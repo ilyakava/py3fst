@@ -57,7 +57,7 @@ if __name__ == '__main__':
     paddings = ((4,4,2), (4,4,8), (4,4,2))
     H, W, D = 1096, 492, 102
     hyper = autograd.Variable(torch.randn(1, 1, H, W, D).type(dtype))
-    Phi = np.empty((H, W, ), dtype='single')
+    Phi = np.empty((H*W, ), dtype='single')
 
     # paddings = np.ceil((Mss - 1) / 2.).astype(int)
 
@@ -77,11 +77,12 @@ if __name__ == '__main__':
         i2 = i1 + 2;
         tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0], paddings[0])
         tmp1 = tmp1 * tmp1;
-        pdb.set_trace()
-        out1 = torch.sum(tmp1, dim=1)
+        out1 = torch.sum(tmp1, dim=1, keepdim=True)
+        out1 = torch.sqrt(out1)
         del tmp1
         if i == 0:
-            np.append(Phi, out1.numpy(), axis=3)
+            pdb.set_trace()
+            np.append(Phi, reshape(out1.numpy(), (H*W, out1.size(4))), axis=1)
             del out1
         else:
             for j in range(0, winO2.nfilt):
@@ -89,7 +90,8 @@ if __name__ == '__main__':
                 j2 = j1 + 2;
                 tmp2 = F.conv3d(out1, M2filt[j1:j2,:,:,:,:], None, strides[1], paddings[1])
                 tmp2 = tmp2 * tmp2;
-                out2 = torch.sum(tmp2, dim=1)
+                out2 = torch.sum(tmp2, dim=1, keepdim=True)
+                out2 = torch.sqrt(out2)
                 del tmp2
                 if j == 0:
                     np.append(Phi, out2.numpy(), axis=3)
@@ -97,7 +99,8 @@ if __name__ == '__main__':
                 else:
                     tmp3 = F.conv3d(out2, M3filt, None, strides[2], paddings[2])
                     tmp3 = tmp3 * tmp3;
-                    out3 = torch.sum(tmp3, dim=1)
+                    out3 = torch.sum(tmp3, dim=1, keepdim=True)
+                    out3 = torch.sqrt(out3)
                     del tmp3
                     np.append(Phi, out3.numpy(), axis=3)
                     del out3
