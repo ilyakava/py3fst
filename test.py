@@ -97,6 +97,7 @@ if __name__ == '__main__':
                     Phi = np.append(Phi, (out2.view(H*W,out2.size(4)).data).cpu().numpy(), axis=1)
                     del out2
                 else:
+                    pdb.set_trace()
                     tmp3 = F.conv3d(out2, M3filt, None, strides[2], paddings[2])
                     tmp3 = tmp3 * tmp3;
                     out3 = torch.sum(tmp3, dim=1, keepdim=True)
