@@ -94,6 +94,7 @@ if __name__ == '__main__':
                 out2 = torch.sqrt(out2)
                 del tmp2
                 if j == 0:
+                    pdb.set_trace()
                     Phi = np.append(Phi, (out1.view(H*W,out2.size(4)).data).cpu().numpy(), axis=1)
                     del out2
                 else:
