@@ -27,27 +27,22 @@ def gabor_window_factory_3D(Ms):
     nfilt = int(np.prod(np.ceil((Ms - 1) / 2.) + 1))
 
     # out_channels x in_channels x kT x kH x kW
-    filters = np.zeros((nfilt, 1, M1, M2, M3), 'complex128')
+    # a real part channel and an imaginary part channel
+    filters = np.zeros((nfilt, 2, M1, M2, M3))
     filter_params = np.zeros((nfilt, 3))
 
     winOp = 0
     for m1 in range(0, 1 + int(ceil((Ms[0] - 1) / 2.))):
         for m2 in range(0, 1 + int(ceil((Ms[1] - 1) / 2.))):
             for m3 in range(0, 1 + int(ceil((Ms[2] - 1) / 2.))):
-                filters[winOp, 0, :, :, :] = np.exp(2 * np.pi * 1j * (m1 / float(M1) * x1 + \
+                complexfilt = np.exp(2 * np.pi * 1j * (m1 / float(M1) * x1 + \
                     m2 / float(M2) * x2 + m3 / float(M3) * x3)) / np.linalg.norm(Ms);
+                filters[winOp, 0, :, :, :] = complexfilt.real
+                filters[winOp, 1, :, :, :] = complexfilt.imag
                 filter_params[winOp, :] = [m1, m2, m3];
                 winOp = winOp + 1;
     return winO(nfilt, filters, filter_params)
 
-
-def interweave_filt(a, b):
-    ashape = np.shape(a)
-    cshape = ((ashape[0] * 2),) +  ashape[1:]
-    c = np.empty(cshape, dtype=a.dtype)
-    c[0::2,:,:,:,:] = a
-    c[1::2,:,:,:,:] = b
-    return c
 
 if __name__ == '__main__':
     hf = h5py.File('/scratch0/ilya/locDoc/data/hyperspec/features/np_data.h5', 'w')
@@ -65,19 +60,17 @@ if __name__ == '__main__':
 
     # prepare filters
     winO1 = gabor_window_factory_3D(Mss[0,:])
-    catfilt = interweave_filt(winO1.filters.real, winO1.filters.imag)
-    M1filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
+    M1filt = autograd.Variable(torch.from_numpy(winO1.filters).type(dtype))
     winO2 = gabor_window_factory_3D(Mss[1,:])
-    catfilt = interweave_filt(winO2.filters.real, winO2.filters.imag)
-    M2filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
+    M2filt = autograd.Variable(torch.from_numpy(winO2.filters).type(dtype))
     winO3 = gabor_window_factory_3D(Mss[2,:])
-    catfilt = np.concatenate((winO3.filters[0:1,:,:,:,:].real, winO3.filters[0:1,:,:,:,:].imag))
-    M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
+    M3filt = autograd.Variable(torch.from_numpy(winO3.filters[0:1,:,:,:,:]).type(dtype))
 
     for i in tqdm(range(0, winO1.nfilt)):
         i1 = (i*2);
         i2 = i1 + 2;
         tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0], paddings[0])
+        pdb.set_trace()
         tmp1 = tmp1 * tmp1;
         out1 = torch.sum(tmp1, dim=1, keepdim=True)
         out1 = torch.sqrt(out1)
