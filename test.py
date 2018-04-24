@@ -67,9 +67,9 @@ if __name__ == '__main__':
     M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
 
     for i in range(0, win01.nfilt):
-        is = (i*2);
-        ie = is + 2;
-        tmp1 = F.conv3d(hyper, M1filt[is:ie,:,:,:,:], None, strides[0,:], paddings[0,:])
+        i1 = (i*2);
+        i2 = i1 + 2;
+        tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0,:], paddings[0,:])
         tmp1 = tmp1 * tmp1;
         pdb.set_trace()
         out1 = torch.sum(tmp1, dim=1)
@@ -79,9 +79,9 @@ if __name__ == '__main__':
             del out1
         else:
             for j in range(0, win02.nfilt):
-                js = (j*2);
-                je = js + 2;
-                tmp2 = F.conv3d(out1, M2filt[js:je,:,:,:,:], None, strides[1,:], paddings[1,:])
+                j1 = (j*2);
+                j2 = j1 + 2;
+                tmp2 = F.conv3d(out1, M2filt[j1:j2,:,:,:,:], None, strides[1,:], paddings[1,:])
                 tmp2 = tmp2 * tmp2;
                 out2 = torch.sum(tmp2, dim=1)
                 del tmp2
