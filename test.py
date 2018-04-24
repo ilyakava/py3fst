@@ -71,7 +71,7 @@ if __name__ == '__main__':
     catfilt = np.concatenate((winO3.filters[0,:,:,:,:].real, winO3.filters[0,:,:,:,:].imag))
     M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
 
-    for i in range(0, win01.nfilt):
+    for i in range(0, winO1.nfilt):
         i1 = (i*2);
         i2 = i1 + 2;
         tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0,:], paddings[0,:])
@@ -83,7 +83,7 @@ if __name__ == '__main__':
             np.append(Phi, out1.numpy(), axis=3)
             del out1
         else:
-            for j in range(0, win02.nfilt):
+            for j in range(0, winO2.nfilt):
                 j1 = (j*2);
                 j2 = j1 + 2;
                 tmp2 = F.conv3d(out1, M2filt[j1:j2,:,:,:,:], None, strides[1,:], paddings[1,:])
