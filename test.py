@@ -104,7 +104,6 @@ if __name__ == '__main__':
                     del tmp3
                     Phi = np.append(Phi, (out3.view(H*W,out3.size(4)).data).cpu().numpy(), axis=1)
                     del out3
-                    sys.stdout.write('.')
 
     hf.create_dataset('feats', data=Phi)
     hf.close()
