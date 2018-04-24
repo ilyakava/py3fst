@@ -8,7 +8,7 @@ import torch.autograd as autograd
 import torch.nn.functional as F
 
 import h5py
-import sys
+from tqdm import tqdm
 
 import pdb
 
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     catfilt = np.concatenate((winO3.filters[0:1,:,:,:,:].real, winO3.filters[0:1,:,:,:,:].imag))
     M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
 
-    for i in range(0, winO1.nfilt):
+    for i in tqdm(range(0, winO1.nfilt)):
         i1 = (i*2);
         i2 = i1 + 2;
         tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0], paddings[0])
