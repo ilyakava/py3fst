@@ -70,7 +70,7 @@ if __name__ == '__main__':
     catfilt = interweave_filt(winO2.filters.real, winO2.filters.imag)
     M2filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
     winO3 = gabor_window_factory_3D(Mss[2,:])
-    catfilt = np.concatenate((winO3.filters[0,:,:,:,:].real, winO3.filters[0,:,:,:,:].imag))
+    catfilt = np.concatenate((winO3.filters[0:1,:,:,:,:].real, winO3.filters[0:1,:,:,:,:].imag))
     M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
 
     for i in range(0, winO1.nfilt):
@@ -97,7 +97,6 @@ if __name__ == '__main__':
                     Phi = np.append(Phi, (out2.view(H*W,out2.size(4)).data).cpu().numpy(), axis=1)
                     del out2
                 else:
-                    pdb.set_trace()
                     tmp3 = F.conv3d(out2, M3filt, None, strides[2], paddings[2])
                     tmp3 = tmp3 * tmp3;
                     out3 = torch.sum(tmp3, dim=1, keepdim=True)
