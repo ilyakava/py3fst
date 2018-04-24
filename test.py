@@ -7,6 +7,8 @@ import torch
 import torch.autograd as autograd
 import torch.nn.functional as F
 
+import h5py
+
 import pdb
 
 # dtype = torch.FloatTensor
@@ -38,6 +40,7 @@ def gabor_window_factory_3D(Ms):
     return winO(nfilt, filters, filter_params)
 
 def interweave(a, b):
+    pdb.set_trace()
     c = np.empty((a.size + b.size,), dtype=a.dtype)
     c[0::2] = a
     c[1::2] = b
@@ -53,7 +56,7 @@ if __name__ == '__main__':
     hyper = autograd.Variable(torch.randn(1, 1, H, W, D).type(dtype))
     Phi = np.empty((H, W, ), dtype='single')
 
-    paddings = int(np.ceil((Mss - 1) / 2.))
+    paddings = np.ceil((Mss - 1) / 2.).astype(int)
 
     # prepare filters
     winO1 = gabor_window_factory_3D(Mss[1,:])
