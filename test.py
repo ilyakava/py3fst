@@ -66,7 +66,7 @@ if __name__ == '__main__':
     winO3 = gabor_window_factory_3D(Mss[2,:])
     M3filt = autograd.Variable(torch.from_numpy(winO3.filters[0:1,:,:,:,:]).type(dtype))
 
-    for i in tqdm(range(0, winO1.nfilt)):
+    for i in range(0, winO1.nfilt):
         i1 = (i*2);
         i2 = i1 + 2;
         tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0], paddings[0])
