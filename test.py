@@ -53,12 +53,13 @@ if __name__ == '__main__':
     # see http://christopherlovell.co.uk/blog/2016/04/27/h5py-intro.html
 
     Mss = np.array([[9,9,4], [9,9,16], [9,9,4]])
-    strides = np.array([[1,1,4], [1,1,16], [1,1,4]])
+    strides = ((1,1,4), (1,1,16), (1,1,4))
+    paddings = ((4,4,2), (4,4,8), (4,4,2))
     H, W, D = 1096, 492, 102
     hyper = autograd.Variable(torch.randn(1, 1, H, W, D).type(dtype))
     Phi = np.empty((H, W, ), dtype='single')
 
-    paddings = np.ceil((Mss - 1) / 2.).astype(int)
+    # paddings = np.ceil((Mss - 1) / 2.).astype(int)
 
     # prepare filters
     winO1 = gabor_window_factory_3D(Mss[0,:])
@@ -74,7 +75,7 @@ if __name__ == '__main__':
     for i in range(0, winO1.nfilt):
         i1 = (i*2);
         i2 = i1 + 2;
-        tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0,:], paddings[0,:])
+        tmp1 = F.conv3d(hyper, M1filt[i1:i2,:,:,:,:], None, strides[0], paddings[0])
         tmp1 = tmp1 * tmp1;
         pdb.set_trace()
         out1 = torch.sum(tmp1, dim=1)
@@ -86,7 +87,7 @@ if __name__ == '__main__':
             for j in range(0, winO2.nfilt):
                 j1 = (j*2);
                 j2 = j1 + 2;
-                tmp2 = F.conv3d(out1, M2filt[j1:j2,:,:,:,:], None, strides[1,:], paddings[1,:])
+                tmp2 = F.conv3d(out1, M2filt[j1:j2,:,:,:,:], None, strides[1], paddings[1])
                 tmp2 = tmp2 * tmp2;
                 out2 = torch.sum(tmp2, dim=1)
                 del tmp2
@@ -94,7 +95,7 @@ if __name__ == '__main__':
                     np.append(Phi, out2.numpy(), axis=3)
                     del out2
                 else:
-                    tmp3 = F.conv3d(out2, M3filt, None, strides[2,:], paddings[2,:])
+                    tmp3 = F.conv3d(out2, M3filt, None, strides[2], paddings[2])
                     tmp3 = tmp3 * tmp3;
                     out3 = torch.sum(tmp3, dim=1)
                     del tmp3
