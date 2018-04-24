@@ -52,7 +52,6 @@ if __name__ == '__main__':
     strides = ((1,1,4), (1,1,16), (1,1,4))
     paddings = ((4,4,2), (4,4,8), (4,4,2))
     H, W, D = 1096, 492, 102
-    # batch size, num input channesls
     hyper = autograd.Variable(torch.randn(1, 1, H, W, D).type(dtype))
     Phi = np.empty((H*W, 0), dtype='single')
 
