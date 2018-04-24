@@ -61,13 +61,13 @@ if __name__ == '__main__':
     paddings = np.ceil((Mss - 1) / 2.).astype(int)
 
     # prepare filters
-    winO1 = gabor_window_factory_3D(Mss[1,:])
+    winO1 = gabor_window_factory_3D(Mss[0,:])
     catfilt = interweave_filt(winO1.filters.real, winO1.filters.imag)
     M1filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
-    winO2 = gabor_window_factory_3D(Mss[2,:])
+    winO2 = gabor_window_factory_3D(Mss[1,:])
     catfilt = interweave_filt(winO2.filters.real, winO2.filters.imag)
     M2filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
-    winO3 = gabor_window_factory_3D(Mss[3,:])
+    winO3 = gabor_window_factory_3D(Mss[2,:])
     catfilt = np.concatenate((winO3.filters[0,:,:,:,:].real, winO3.filters[0,:,:,:,:].imag))
     M3filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
 
