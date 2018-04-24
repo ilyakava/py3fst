@@ -8,6 +8,7 @@ import torch.autograd as autograd
 import torch.nn.functional as F
 
 import h5py
+import sys
 
 import pdb
 
@@ -57,7 +58,7 @@ if __name__ == '__main__':
     paddings = ((4,4,2), (4,4,8), (4,4,2))
     H, W, D = 1096, 492, 102
     hyper = autograd.Variable(torch.randn(1, 1, H, W, D).type(dtype))
-    Phi = np.empty((H*W, ), dtype='single')
+    Phi = np.empty((H*W, 0), dtype='single')
 
     # paddings = np.ceil((Mss - 1) / 2.).astype(int)
 
@@ -81,8 +82,7 @@ if __name__ == '__main__':
         out1 = torch.sqrt(out1)
         del tmp1
         if i == 0:
-            pdb.set_trace()
-            np.append(Phi, reshape(out1.numpy(), (H*W, out1.size(4))), axis=1)
+            Phi = np.append(Phi, (out1.view(H*W,out1.size(4)).data).cpu().numpy(), axis=1)
             del out1
         else:
             for j in range(0, winO2.nfilt):
@@ -94,7 +94,7 @@ if __name__ == '__main__':
                 out2 = torch.sqrt(out2)
                 del tmp2
                 if j == 0:
-                    np.append(Phi, out2.numpy(), axis=3)
+                    Phi = np.append(Phi, (out1.view(H*W,out2.size(4)).data).cpu().numpy(), axis=1)
                     del out2
                 else:
                     tmp3 = F.conv3d(out2, M3filt, None, strides[2], paddings[2])
@@ -102,8 +102,9 @@ if __name__ == '__main__':
                     out3 = torch.sum(tmp3, dim=1, keepdim=True)
                     out3 = torch.sqrt(out3)
                     del tmp3
-                    np.append(Phi, out3.numpy(), axis=3)
+                    Phi = np.append(Phi, (out1.view(H*W,out3.size(4)).data).cpu().numpy(), axis=1)
                     del out3
+                    sys.stdout.write('.')
 
     hf.create_dataset('feats', data=Phi)
     hf.close()
