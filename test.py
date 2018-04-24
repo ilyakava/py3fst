@@ -39,11 +39,13 @@ def gabor_window_factory_3D(Ms):
                 winOp = winOp + 1;
     return winO(nfilt, filters, filter_params)
 
-def interweave(a, b):
-    pdb.set_trace()
-    c = np.empty((a.size + b.size,), dtype=a.dtype)
-    c[0::2] = a
-    c[1::2] = b
+
+def interweave_filt(a, b):
+    ashape = np.shape(a)
+    cshape = ((ashape[0] * 2),) +  ashape[1:]
+    c = np.empty(cshape, dtype=a.dtype)
+    c[0::2,:,:,:,:] = a
+    c[1::2,:,:,:,:] = b
     return c
 
 if __name__ == '__main__':
@@ -60,10 +62,10 @@ if __name__ == '__main__':
 
     # prepare filters
     winO1 = gabor_window_factory_3D(Mss[1,:])
-    catfilt = interweave(winO1.filters.real, winO1.filters.imag)
+    catfilt = interweave_filt(winO1.filters.real, winO1.filters.imag)
     M1filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
     winO2 = gabor_window_factory_3D(Mss[2,:])
-    catfilt = interweave(winO2.filters.real, winO2.filters.imag)
+    catfilt = interweave_filt(winO2.filters.real, winO2.filters.imag)
     M2filt = autograd.Variable(torch.from_numpy(catfilt).type(dtype))
     winO3 = gabor_window_factory_3D(Mss[3,:])
     catfilt = np.concatenate((winO3.filters[0,:,:,:,:].real, winO3.filters[0,:,:,:,:].imag))
