@@ -43,6 +43,39 @@ def gabor_window_factory_3D(Ms):
                 winOp = winOp + 1;
     return winO(nfilt, filters, filter_params)
 
+def tang_phi_window_3D(J,x,y,b):
+    phi = np.exp(-9*(x**2 + y**2 + b**2) / 2**(2*J+3))
+    lamdaJ = 1 / np.linalg.norm(phi)
+    return phi * lamdaJ
+
+def tang_psi_window_3D(j, nu, kappa,x,y,b):
+    xi = 3 * np.pi / 4
+    var = (4/3)**2 # see scatwave morlet_filter_bank_1d.m
+    x = x * 2**(-j)
+    y = y * 2**(-j)
+    b = b * 2**(-j)
+    xprime = np.cos(nu)*np.cos(kappa)*x + \
+            -np.cos(nu)*np.sin(kappa)*y + \
+            np.sin(nu)*b
+    psi_jgamma = np.exp(1j + xi * xprime* - (x**2 + y**2 + b**2)/(2*var))
+    S = np.linalg.norm(psi_jgamma)
+    return psi_jgamma / S
+
+def tang_window_factory_3D(J, angles, H, W, B):
+    x = np.tile(np.arrange(H), (1, W, B))
+    y = np.tile(np.arrange(W), (H, 1, B))
+    b = np.tile(np.arrange(B), (H, W, 1))
+    
+    fourier_filters[0, :,:,:] = np.fft(tang_phi_window_3D(J,x,y,b))
+    fp = 1
+    for j in range(J):
+        for nu in angles:
+            for kappa in angles:
+                fourier_filters[fp, :,:,:] = np.fft(tang_psi_window_3D(j, nu, kappa,x,y,b))
+                fp += 1
+    filter_params = np.zeros((fp, 3)) # TODO
+    return winO(fp, fourier_filters, filter_params)
+
 
 if __name__ == '__main__':
     hf = h5py.File('/scratch0/ilya/locDoc/data/hyperspec/features/np_data.h5', 'w')
