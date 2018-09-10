@@ -52,6 +52,23 @@ def tang_phi_window_3D(J,x,y,b):
     lamdaJ = 1 / np.linalg.norm(phi)
     return phi * lamdaJ
 
+def tang_psi_window_3D_flat(scale, nu, kappa, kernel_size):
+    """
+    Args:
+        kernel_size: a tuple of filter size (x,y,b)
+    """
+    x_pts = np.linspace(0, kernel_size[0]-1, kernel_size[0]) - (kernel_size[0]-1)/2
+    y_pts = np.linspace(0, kernel_size[1]-1, kernel_size[1]) - (kernel_size[1]-1)/2
+    b_pts = np.linspace(0, kernel_size[2]-1, kernel_size[2]) - (kernel_size[2]-1)/2
+
+    coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
+
+    kernel_pts = np.zeros((coords.shape[0],), dtype=np.complex64)
+    for coord_i, coord in enumerate(coords):
+        x,y,b = coords[coord_i]
+        kernel_pts[coord_i] = tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b)
+    return [kernel_pts, coords]
+
 def tang_psi_window_3D(scale, nu, kappa, kernel_size):
     """
     Args:
@@ -207,18 +224,6 @@ import plotly.offline as py
 from plotly.graph_objs import *
 import scipy.misc
 
-pl_BrBG=[[0.0, 'rgb(84, 48, 5)'],
-         [0.1, 'rgb(138, 80, 9)'],
-         [0.2, 'rgb(191, 129, 45)'],
-         [0.3, 'rgb(222, 192, 123)'],
-         [0.4, 'rgb(246, 232, 195)'],
-         [0.5, 'rgb(244, 244, 244)'],
-         [0.6, 'rgb(199, 234, 229)'],
-         [0.7, 'rgb(126, 203, 192)'],
-         [0.8, 'rgb(53, 151, 143)'],
-         [0.9, 'rgb(0, 101, 93)'],
-         [1.0, 'rgb(0, 60, 48)']]
-
 def get_the_slice(x,y,z, surfacecolor,  colorscale='Hot', showscale=False):
     # Greys,YlGnBu,Greens,YlOrRd,Bluered,RdBu,Reds,Blues,Picnic,Rainbow,Portland,Jet,Hot,Blackbody,Earth,Electric,Viridis,CividisGreys,YlGnBu,Greens,YlOrRd,Bluered,RdBu,Reds,Blues,Picnic,Rainbow,Portland,Jet,Hot,Blackbody,Earth,Electric,Viridis,Cividis
     return Surface(x=x,# https://plot.ly/python/reference/#surface
@@ -230,36 +235,17 @@ def get_the_slice(x,y,z, surfacecolor,  colorscale='Hot', showscale=False):
 def get_lims_colors(surfacecolor):# color limits for a slice
     return np.min(surfacecolor), np.max(surfacecolor)
 
-def egplot():
-    volume=lambda x,y,z: x*np.exp(-x**2-y**2-z**2)
-    
-    x=np.linspace(-2,2, 50)
-    y=np.linspace(-2,2, 50)
-    x,y=np.meshgrid(x,y)
-    z=np.zeros(x.shape)
-    surfcolor_z=volume(x,y,z)
+def str_to_filename(mystr):
+    return "".join([c for c in mystr if c.isalpha() or c.isdigit() or c==' ']).rstrip()
 
-    x=np.linspace(-2,2, 50)
-    z=np.linspace(-2,2, 50)
-    x,z=np.meshgrid(x,z)
-    y=np.zeros(x.shape)
-    surfcolor_y=volume(x,y,z)
-
-    y=np.linspace(-2,2, 50)
-    z=np.linspace(-2,2, 50)
-    y,z=np.meshgrid(y,z)
-    x=np.zeros(y.shape)
-    surfcolor_x=volume(x,y,z)
-    
-    pyplot_slices(surfcolor_y, surfcolor_z.transpose(), surfcolor_x.transpose())
-
-def pyplot_slices(surfcolor_z, surfcolor_y,surfcolor_x,resample_factor=50):
+def pyplot_slices(surfcolor_z, surfcolor_y,surfcolor_x,title=None,resample_factor=50):
     """
     Args:
         surfcolor_z: img that has x on vertical, y on horiz
-        surfcolor_y: img that has z on vertical, x on horiz
-        surfcolor_x: img that has z on vertical, y on horiz
+        surfcolor_y: img that has x on vertical, z on horiz
+        surfcolor_x: img that has y on vertical, z on horiz
     """
+
     surfcolor_z = scipy.misc.imresize(surfcolor_z, resample_factor*np.array(surfcolor_z.shape), interp='nearest')
     surfcolor_y= scipy.misc.imresize(surfcolor_y, resample_factor*np.array(surfcolor_y.shape), interp='nearest')
     surfcolor_x = scipy.misc.imresize(surfcolor_x, resample_factor*np.array(surfcolor_x.shape), interp='nearest')
@@ -270,28 +256,28 @@ def pyplot_slices(surfcolor_z, surfcolor_y,surfcolor_x,resample_factor=50):
     z=np.zeros(x.shape)
     slice_z=get_the_slice(x,y,z, surfcolor_z)    
     
-    x=np.linspace(-1,1, surfcolor_y.shape[1])
-    z=np.linspace(-1,1, surfcolor_y.shape[0])
-    x,z=np.meshgrid(x,z)
+    x=np.linspace(-1,1, surfcolor_y.shape[0])
+    z=np.linspace(-1,1, surfcolor_y.shape[1])
+    z,x=np.meshgrid(z,x)
     y=np.zeros(x.shape)
     slice_y=get_the_slice(x,y,z, surfcolor_y)
 
-    y=np.linspace(-1,1, surfcolor_x.shape[1])
-    z=np.linspace(-1,1, surfcolor_x.shape[0])
-    y,z=np.meshgrid(y,z)
+    y=np.linspace(-1,1, surfcolor_x.shape[0])
+    z=np.linspace(-1,1, surfcolor_x.shape[1])
+    z,y=np.meshgrid(z,y)
     x=np.zeros(z.shape)
     slice_x=get_the_slice(x,y,z, surfcolor_x)
 
-    sminz, smaxz=get_lims_colors(surfcolor_z)
-    sminy, smaxy=get_lims_colors(surfcolor_y)
-    sminx, smaxx=get_lims_colors(surfcolor_x)
-    vmin=min([sminz, sminy, sminx])
-    vmax=max([smaxz, smaxy, smaxx])
+    # sminz, smaxz=get_lims_colors(surfcolor_z)
+    # sminy, smaxy=get_lims_colors(surfcolor_y)
+    # sminx, smaxx=get_lims_colors(surfcolor_x)
+    # vmin=min([sminz, sminy, sminx])
+    # vmax=max([smaxz, smaxy, smaxx])
 
     # slice_z.update(cmin=vmin, cmax=vmax)
     # slice_y.update(cmin=vmin, cmax=vmax)
     # slice_x.update(cmin=vmin, cmax=vmax, showscale=True)
-    slice_x.update(showscale=True)
+    # slice_x.update(showscale=True)
 
     axis = dict(showbackground=True, 
             backgroundcolor="rgb(230, 230,230)",
@@ -300,8 +286,9 @@ def pyplot_slices(surfcolor_z, surfcolor_y,surfcolor_x,resample_factor=50):
             )
 
 
+    title = title or 'Slices in volumetric data'
     layout = Layout(
-             title='Slices in volumetric data', 
+             title=title, 
              width=700,
              height=700,
              scene=Scene(xaxis=XAxis(axis),
@@ -315,13 +302,72 @@ def pyplot_slices(surfcolor_z, surfcolor_y,surfcolor_x,resample_factor=50):
             )
 
     fig=Figure(data=Data([slice_z,slice_y,slice_x]), layout=layout)
-    # pdb.set_trace()
-    py.plot(fig, filename='Slice-volumetric-2.html')
+    py.plot(fig, filename=str_to_filename(title)+'.html', auto_open=False)
+
+def make_slice_plots():
+    for scale in [0,1,2]:
+        for nu in [0,1,2]:
+            for kappa in [0,1,2]:
+                cube = tang_psi_window_3D(scale, nu*np.pi/3, kappa*np.pi/3, [7,7,7])
+                cube = np.imag(cube)
+                title = 'j=%d, nu=%d, kappa=%d' % (scale, nu, kappa)
+                pyplot_slices(cube[:,:,3], cube[:,3,:], cube[3,:,:], title=title)
+
+def pyplot_3dscatter(vals, locs, title=None):
+    """
+    Example usage:
+    [vals, locs] = tang_psi_window_3D_flat(1, 1*np.pi/3, 1*np.pi/3, [7,7,7])
+    vals = np.imag(vals)
+    pyplot_3dscatter(vals, locs)
+    """
+    
+    trace1 = Scatter3d(
+        x=locs[:,0],
+        y=locs[:,1],
+        z=locs[:,2],
+        mode='markers',
+        marker=dict(
+            size=90*np.abs(vals)/vals.max(),
+            color=vals,
+            colorscale='Hot',
+            opacity=0.9
+        )
+    )
+
+    data = [trace1]
+    axis = dict(showbackground=True, 
+            backgroundcolor="rgb(230, 230,230)",
+            gridcolor="rgb(255, 255, 255)",      
+            zerolinecolor="rgb(255, 255, 255)",  
+            )
+    title = title or '3D Scatter Plot with Colorscaling'
+    layout = Layout(
+        title=title, 
+        width=700,
+        height=700,
+        # margin=dict(
+        #     l=0,
+        #     r=0,
+        #     b=0,
+        #     t=0
+        # ),
+        scene=Scene(xaxis=XAxis(axis),
+                         yaxis=YAxis(axis), 
+                         zaxis=ZAxis(axis), 
+                        )
+    )
+    fig = Figure(data=data, layout=layout)
+    py.plot(fig, filename=str_to_filename(title)+'.html', auto_open=False)
 
 if __name__ == '__main__':
-    cube = tang_psi_window_3D(1, np.pi/3, np.pi/3, [7,7,7])
-    cube = np.real(cube)
-    pyplot_slices(cube[:,:,3], cube[:,3,:].transpose(), cube[3,:,:].transpose())
+    for scale in [0,1,2]:
+        for nu in [0,1,2]:
+            for kappa in [0,1,2]:
+                [vals, locs] = tang_psi_window_3D_flat(scale, nu*np.pi/3, kappa*np.pi/3, [7,7,7])
+                vals = np.imag(vals)
+                pyplot_3dscatter(vals, locs)
+                title = 'j=%d, nu=%d, kappa=%d' % (scale, nu, kappa)
+                pyplot_3dscatter(vals, locs, title=title)
     # egplot()
     # pdb.set_trace()
 
