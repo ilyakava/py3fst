@@ -91,7 +91,8 @@ def tang_psi_window_3D(scale, nu, kappa, kernel_size):
         x_i,y_i,b_i = coords_idxs[coord_i]
         x,y,b = coords[coord_i]
         kernel[x_i,y_i,b_i] = tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b)
-    return kernel
+    S = np.linalg.norm(kernel)
+    return kernel / S
 
 
 def tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b):
@@ -182,7 +183,6 @@ def main():
 
 # import numpy as np
 import matplotlib.pyplot as plt
-
 
 class IndexTracker(object):
     """For scrolling through layers of 3d vis
@@ -359,7 +359,7 @@ def pyplot_3dscatter(vals, locs, title=None):
     fig = Figure(data=data, layout=layout)
     py.plot(fig, filename=str_to_filename(title)+'.html', auto_open=False)
 
-if __name__ == '__main__':
+def make_3dscatter_plots():
     for scale in [0,1,2]:
         for nu in [0,1,2]:
             for kappa in [0,1,2]:
@@ -368,8 +368,11 @@ if __name__ == '__main__':
                 pyplot_3dscatter(vals, locs)
                 title = 'j=%d, nu=%d, kappa=%d' % (scale, nu, kappa)
                 pyplot_3dscatter(vals, locs, title=title)
-    # egplot()
-    # pdb.set_trace()
+
+if __name__ == '__main__':
+    cube = tang_psi_window_3D(1, 1*np.pi/3, 1*np.pi/3, [7,7,7])
+    cube = np.imag(cube)
+    pyplot_slices(cube[:,:,3], cube[:,3,:], cube[3,:,:])
 
 
 
