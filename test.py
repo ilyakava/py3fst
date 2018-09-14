@@ -57,9 +57,9 @@ def tang_psi_window_3D_flat(scale, nu, kappa, kernel_size):
     Args:
         kernel_size: a tuple of filter size (x,y,b)
     """
-    x_pts = np.linspace(0, kernel_size[0]-1, kernel_size[0]) - (kernel_size[0]-1)/2
-    y_pts = np.linspace(0, kernel_size[1]-1, kernel_size[1]) - (kernel_size[1]-1)/2
-    b_pts = np.linspace(0, kernel_size[2]-1, kernel_size[2]) - (kernel_size[2]-1)/2
+    x_pts = np.linspace(0, kernel_size[0]-1, kernel_size[0]) - (kernel_size[0]-1)/2.0
+    y_pts = np.linspace(0, kernel_size[1]-1, kernel_size[1]) - (kernel_size[1]-1)/2.0
+    b_pts = np.linspace(0, kernel_size[2]-1, kernel_size[2]) - (kernel_size[2]-1)/2.0
 
     coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
 
@@ -68,46 +68,6 @@ def tang_psi_window_3D_flat(scale, nu, kappa, kernel_size):
         x,y,b = coords[coord_i]
         kernel_pts[coord_i] = tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b)
     return [kernel_pts, coords]
-
-def tang_psi_window_3D(scale, nu, kappa, kernel_size):
-    """
-    Args:
-        kernel_size: a tuple of filter size (x,y,b)
-    """
-    x_pts = np.linspace(0, kernel_size[0]-1, kernel_size[0]) - (kernel_size[0]-1)/2
-    y_pts = np.linspace(0, kernel_size[1]-1, kernel_size[1]) - (kernel_size[1]-1)/2
-    b_pts = np.linspace(0, kernel_size[2]-1, kernel_size[2]) - (kernel_size[2]-1)/2
-
-    coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
-
-    x_idxs = np.linspace(0, kernel_size[0]-1, kernel_size[0], dtype=int)
-    y_idxs = np.linspace(0, kernel_size[1]-1, kernel_size[1], dtype=int)
-    b_idxs = np.linspace(0, kernel_size[2]-1, kernel_size[2], dtype=int)
-
-    coords_idxs = np.array(list(itertools.product(x_idxs, y_idxs, b_idxs)))
-
-    kernel = np.zeros(kernel_size, dtype=np.complex64)
-    for coord_i, coord in enumerate(coords):
-        x_i,y_i,b_i = coords_idxs[coord_i]
-        x,y,b = coords[coord_i]
-        kernel[x_i,y_i,b_i] = tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b)
-    S = np.linalg.norm(kernel)
-    return kernel / S
-
-
-def tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b):
-    """Un-normalized
-    
-    """
-    xi = 3 * np.pi / 4
-    var = (4/3)**2 # see scatwave morlet_filter_bank_1d.m
-    xprime = np.cos(nu)*np.cos(kappa)*x + \
-            -np.cos(nu)*np.sin(kappa)*y + \
-            np.sin(nu)*b
-    psi_jgamma = 2**(-2*scale) * np.exp(1j * xi * xprime * 2**(-scale) \
-         - (x**2 + y**2 + b**2)/(2*var))
-    # S = np.linalg.norm(psi_jgamma)
-    return psi_jgamma
 
 def tang_window_factory_3D(J, angles, H, W, B):
     x = np.tile(np.arrange(H), (1, W, B))
@@ -370,9 +330,10 @@ def make_3dscatter_plots():
                 pyplot_3dscatter(vals, locs, title=title)
 
 if __name__ == '__main__':
-    cube = tang_psi_window_3D(1, 1*np.pi/3, 1*np.pi/3, [7,7,7])
-    cube = np.imag(cube)
-    pyplot_slices(cube[:,:,3], cube[:,3,:], cube[3,:,:])
+    print("Hello dropbox")
+    # cube = tang_psi_window_3D(1, 1*np.pi/3, 1*np.pi/3, [7,7,7])
+    # cube = np.imag(cube)
+    # pyplot_slices(cube[:,:,3], cube[:,3,:], cube[3,:,:])
 
 
 
