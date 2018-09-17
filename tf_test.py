@@ -1,6 +1,7 @@
 
 from collections import namedtuple
 import itertools
+import os
 
 import numpy as np
 import tensorflow as tf
@@ -99,9 +100,10 @@ def tang_feat(data):
 
         return tf.concat([S0,S1,S2],0)
 
-    pixels = np.array(list(itertools.product(range(data.shape[0]),range(data.shape[1]))))
+    pixels = np.array(list(itertools.product(range(data.shape[1]),range(data.shape[0]))))
     for pixel in pixels:
-        [pixel_x, pixel_y] = pixel
+        # this iterates through columns first
+        [pixel_y, pixel_x] = pixel
         subimg = x[pixel_x:(pixel_x+19), pixel_y:(pixel_y+19), :]
     
         # feat = model_fn(tf.Variable(subimg), psiO, phiO)
@@ -114,7 +116,9 @@ def tang_feat(data):
 
 
 if __name__ == '__main__':
-    mat_contents = sio.loadmat('/Users/artsyinc/Documents/MATH630/research/data/hyper/Indian_pines.mat')
-    data = mat_contents['indian_pines'].astype(np.float32)
+    data_path = '/scratch0/ilya/locDoc/data/hyperspec'
+    data_file = os.path.join(data_path, 'Indian_pines_corrected.mat')
+    mat_contents = sio.loadmat(data_file)
+    data = mat_contents['indian_pines_corrected'].astype(np.float32)
     data /= np.max(np.abs(data))
     tang_feat(data)
