@@ -36,8 +36,12 @@ def tang_phi_window_3D(J, kernel_size):
     return winO(1, np.expand_dims(kernel,-1), [[J]], kernel_size)
 
 
-def tang_psi_factory(J, K, kernel_size):
-    filter_params = np.array(list(itertools.product(range(J),range(K),range(K))))
+def tang_psi_factory(J, K, kernel_size, min_scale=0):
+    """
+    Note how scale is the "most significant bit"
+    """
+    assert min_scale < J, 'min scale >= max scale'
+    filter_params = np.array(list(itertools.product(range(min_scale, J),range(K),range(K))))
     nfilt = filter_params.shape[0]
     filters = np.zeros(kernel_size + [nfilt], dtype=np.complex64)
 
