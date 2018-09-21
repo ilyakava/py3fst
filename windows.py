@@ -47,7 +47,7 @@ def tang_psi_factory(J, K, kernel_size, min_scale=0):
 
     for idx, filter_param in enumerate(filter_params):
         [scale, nu, kappa] = filter_param
-        filters[:,:,:,idx] = tang_psi_window_3D(scale, nu*np.pi/3, kappa*np.pi/3, [7,7,7])
+        filters[:,:,:,idx] = tang_psi_window_3D(scale, nu*np.pi/3, kappa*np.pi/3, kernel_size)
 
     return winO(nfilt, filters, filter_params, kernel_size)
 
@@ -91,3 +91,122 @@ def tang_psi_window_3D_coordinate(scale, nu, kappa,x,y,b):
     # S = np.linalg.norm(psi_jgamma)
     return psi_jgamma
 
+def fst3d_phi_window_3D(kernel_size):
+    """
+    Args:
+        kernel_size: a tuple of filter size (x,y,b)
+    """
+    x_pts = np.linspace(1, kernel_size[0], kernel_size[0])
+    y_pts = np.linspace(1, kernel_size[1], kernel_size[1])
+    b_pts = np.linspace(1, kernel_size[2], kernel_size[2])
+
+    coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
+
+    x_idxs = np.linspace(0, kernel_size[0]-1, kernel_size[0], dtype=int)
+    y_idxs = np.linspace(0, kernel_size[1]-1, kernel_size[1], dtype=int)
+    b_idxs = np.linspace(0, kernel_size[2]-1, kernel_size[2], dtype=int)
+
+    coords_idxs = np.array(list(itertools.product(x_idxs, y_idxs, b_idxs)))
+
+    kernel = np.zeros(kernel_size, dtype=np.complex64)
+    for coord_i, coord in enumerate(coords):
+        x_i,y_i,b_i = coords_idxs[coord_i]
+        x,y,b = coords[coord_i]
+        kernel[x_i,y_i,b_i] = fst3d_psi_window_3D_coordinate(0, 0, 0, float(x),float(y),float(b))
+    S = np.linalg.norm(kernel_size)
+    kernel = kernel / S
+
+    return winO(1, np.expand_dims(kernel,-1), [[0,0,0]], kernel_size)
+
+def fst3d_psi_factory(kernel_size, min_freq=[0,0,0]):
+    """
+    Args:
+        min_freq:
+    """
+    min_freq = np.array(min_freq)
+    assert np.all(min_freq >= np.array([0,0,0])), 'some min freq < 0'
+    assert np.all(min_freq < np.array([1,1,1])), 'some min freq >= 1'
+    filter_params = np.array(list(itertools.product(
+        np.linspace(0, 1, kernel_size[0], endpoint=False),
+        np.linspace(0, 1, kernel_size[1], endpoint=False),
+        np.linspace(0, 1, kernel_size[2], endpoint=False)
+    )))
+    # never do any averaging
+    filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0,0])), filter_params))
+    # remove filters with too low freq
+    filter_params = np.array(filter(lambda fp: np.all(fp >= min_freq), filter_params))
+    filter_params = np.array(filter(lambda fp: np.any(fp > min_freq), filter_params))
+    nfilt = filter_params.shape[0]
+    if nfilt == 0:
+        return winO(0, None, None, kernel_size)
+    else:
+        filters = np.zeros(kernel_size + [nfilt], dtype=np.complex64)
+
+        for idx, filter_param in enumerate(filter_params):
+            [mdM1, mdM2, mdM3] = filter_param
+            filters[:,:,:,idx] = fst3d_psi_window_3D(mdM1, mdM2, mdM3, kernel_size)
+
+        return winO(nfilt, filters, filter_params, kernel_size)
+
+def fst3d_psi_window_3D(m1divM1, m2divM2, m3divM3, kernel_size):
+    """
+    Args:
+        kernel_size: a tuple of filter size (x,y,b)
+    """
+    x_pts = np.linspace(1, kernel_size[0], kernel_size[0])
+    y_pts = np.linspace(1, kernel_size[1], kernel_size[1])
+    b_pts = np.linspace(1, kernel_size[2], kernel_size[2])
+
+    coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
+
+    x_idxs = np.linspace(0, kernel_size[0]-1, kernel_size[0], dtype=int)
+    y_idxs = np.linspace(0, kernel_size[1]-1, kernel_size[1], dtype=int)
+    b_idxs = np.linspace(0, kernel_size[2]-1, kernel_size[2], dtype=int)
+
+    coords_idxs = np.array(list(itertools.product(x_idxs, y_idxs, b_idxs)))
+
+    kernel = np.zeros(kernel_size, dtype=np.complex64)
+    for coord_i, coord in enumerate(coords):
+        x_i,y_i,b_i = coords_idxs[coord_i]
+        x,y,b = coords[coord_i]
+        kernel[x_i,y_i,b_i] = fst3d_psi_window_3D_coordinate(m1divM1, m2divM2, m3divM3,float(x),float(y),float(b))
+    S = np.linalg.norm(kernel_size)
+    return kernel / S
+
+def fst3d_psi_window_3D_coordinate(m1divM1,m2divM2,m3divM3,x,y,b):
+    return np.exp( 2*np.pi*1j*(m1divM1*x + m2divM2*y + m3divM3*b) )
+
+def fst2d_psi_factory(kernel_size, min_freq=[0,0]):
+    """
+    Args:
+        min_freq:
+    """
+    min_freq = np.array(min_freq)
+    assert np.all(min_freq >= np.array([0,0])), 'some min freq < 0'
+    assert np.all(min_freq < np.array([1,1])), 'some min freq >= 1'
+    filter_params = np.array(list(itertools.product(
+        np.linspace(0, 1, kernel_size[0], endpoint=False),
+        np.linspace(0, 1, kernel_size[1], endpoint=False)
+    )))
+    # never do any averaging
+    filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0])), filter_params))
+    # remove filters with too low freq
+    filter_params = np.array(filter(lambda fp: np.all(fp >= min_freq), filter_params))
+    filter_params = np.array(filter(lambda fp: np.any(fp > min_freq), filter_params))
+    nfilt = filter_params.shape[0]
+    if nfilt == 0:
+        return winO(0, None, None, kernel_size)
+    else:
+        filters = np.zeros(kernel_size + [nfilt], dtype=np.complex64)
+
+        for idx, filter_param in enumerate(filter_params):
+            [mdM1, mdM2] = filter_param
+            filters[:,:,idx] = (fst3d_psi_window_3D(mdM1, mdM2, 0, kernel_size + [1]).squeeze() * \
+                np.linalg.norm(kernel_size + [1]) / np.linalg.norm(kernel_size))
+
+        return winO(nfilt, filters, filter_params, kernel_size)
+
+
+if __name__ == '__main__':
+    myres = fst2d_psi_factory([3,3])
+    pdb.set_trace()
