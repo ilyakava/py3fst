@@ -176,7 +176,7 @@ def fst3d_psi_window_3D(m1divM1, m2divM2, m3divM3, kernel_size):
 def fst3d_psi_window_3D_coordinate(m1divM1,m2divM2,m3divM3,x,y,b):
     return np.exp( 2*np.pi*1j*(m1divM1*x + m2divM2*y + m3divM3*b) )
 
-def fst2d_psi_factory(kernel_size, min_freq=[0,0]):
+def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False):
     """
     Args:
         min_freq:
@@ -189,7 +189,8 @@ def fst2d_psi_factory(kernel_size, min_freq=[0,0]):
         np.linspace(0, 1, kernel_size[1], endpoint=False)
     )))
     # never do any averaging
-    filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0])), filter_params))
+    if not include_avg:
+        filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0])), filter_params))
     # remove filters with too low freq
     filter_params = np.array(filter(lambda fp: np.all(fp >= min_freq), filter_params))
     filter_params = np.array(filter(lambda fp: np.any(fp > min_freq), filter_params))
@@ -206,6 +207,13 @@ def fst2d_psi_factory(kernel_size, min_freq=[0,0]):
 
         return winO(nfilt, filters, filter_params, kernel_size)
 
+def fst2d_phi_factory(kernel_size):
+    """
+    """
+    kernel = (fst3d_psi_window_3D(0, 0, 0, kernel_size + [1]) * \
+        np.linalg.norm(kernel_size + [1]) / np.linalg.norm(kernel_size))
+
+    return winO(1, kernel, [[0,0]], kernel_size)
 
 if __name__ == '__main__':
     myres = fst2d_psi_factory([3,3])

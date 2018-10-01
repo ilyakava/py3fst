@@ -1,7 +1,10 @@
 import numpy as np
+
 import plotly.offline as py
 from plotly.graph_objs import *
 import scipy.misc
+
+import pdb
 
 def get_the_slice(x,y,z, surfacecolor,  colorscale='Hot', showscale=False):
     # Greys,YlGnBu,Greens,YlOrRd,Bluered,RdBu,Reds,Blues,Picnic,Rainbow,Portland,Jet,Hot,Blackbody,Earth,Electric,Viridis,CividisGreys,YlGnBu,Greens,YlOrRd,Bluered,RdBu,Reds,Blues,Picnic,Rainbow,Portland,Jet,Hot,Blackbody,Earth,Electric,Viridis,Cividis
@@ -147,3 +150,44 @@ def make_3dscatter_plots():
                 pyplot_3dscatter(vals, locs)
                 title = 'j=%d, nu=%d, kappa=%d' % (scale, nu, kappa)
                 pyplot_3dscatter(vals, locs, title=title)
+
+class ScrollThruPlot(object):
+    """For scrolling through layers of 3d vis
+    https://matplotlib.org/2.1.2/gallery/animation/image_slices_viewer.html
+
+    Example usage:
+
+    import matplotlib.pyplot as plt
+
+    X = np.real(cube)
+    fig, ax = plt.subplots(1, 1)
+    tracker = ScrollThruPlot(ax, X)
+    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
+    plt.show()
+    """
+    def __init__(self, ax, X, fig):
+        self.fig = fig
+        self.ax = ax
+        self.ax.set_title('use scroll wheel to navigate images')
+
+        self.X = X
+        rows, cols, self.slices = X.shape
+        self.ind = 0
+
+        self.im = ax.imshow(self.X[:, :, self.ind] / np.abs(self.X[:, :, self.ind]).max(), cmap='gray')
+        self.update()
+
+    def onscroll(self, event):
+        print("%s %s" % (event.button, event.step))
+        if event.button == 'up':
+            self.ind = (self.ind + 1) % self.slices
+        else:
+            self.ind = (self.ind - 1) % self.slices
+        self.update()
+
+    def update(self):
+        # self.im.cla()
+        self.im.set_data(self.X[:, :, self.ind] / np.abs(self.X[:, :, self.ind]).max())
+        # self.fig.colorbar(self.im)
+        self.ax.set_ylabel('slice %s' % self.ind)
+        self.im.axes.figure.canvas.draw()
