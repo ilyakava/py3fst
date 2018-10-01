@@ -24,11 +24,11 @@ import tensorflow as tf
 import windows as win
 import salt_data as sd
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import pdb
 
 # Training Parameters
-learning_rate = 0.001
+learning_rate = 0.0001
 batch_size = 32
 num_steps = 300
 
@@ -87,7 +87,7 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
         # TF Estimator input is a dict, in case of multiple inputs
 
         # x = tf.reshape(x, shape=[-1, 113, 113, 1])
-        bs = x.get_shape()[0]
+        bs = batch_size
 
         psis[0] = win.fst2d_psi_factory([7, 7], include_avg=False)
         layer_params[0] = layerO((1,1), 'valid')
@@ -129,6 +129,8 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
 
         # filter and separate by original batch via old shape
         S0 = scat2d(x[:,6:-6, 6:-6, :], phi, layer_params[2])
+        print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+        print(S0.get_shape())
         S0 = tf.reshape(S0, (bs, 1, S0.get_shape()[1], S0.get_shape()[2]))
         S1 = scat2d(U1[:,3:-3,3:-3,:], phi, layer_params[2])
         S1 = tf.reshape(S1, (bs, U1os[1], S1.get_shape()[1],S1.get_shape()[2]))
@@ -141,47 +143,65 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
     return tf.transpose(feat2d, [0,2,3,1])
 
 # Create the neural network
-def conv_net(x_dict, n_classes, dropout, reuse, is_training):
+def pixel_net(x_dict, dropout, reuse, is_training):
     # Define a scope for reusing the variables
     with tf.variable_scope('ConvNet', reuse=reuse):
         # TF Estimator input is a dict, like in MNIST example
         x = x_dict['images']
         # x = tf.reshape(x, shape=[-1, 101, 101, 1])
 
+        # (batch, h, w, chan)
         feat = scat2d_to_2d_2layer(x, reuse)
+        fs = feat.get_shape()
+        feat = tf.reshape(feat, (fs[0]*fs[1]*fs[2], fs[3]))
 
-        # 1x1 conv replaces PCA step
-        conv1 = tf.layers.conv2d(feat, 64, 1)
-
-        # Convolution Layer with 64 filters and a kernel size of 3
-        conv2 = tf.layers.conv2d(conv1, 64, 3, activation=tf.nn.relu)
-        # Max Pooling (down-sampling) with strides of 2 and kernel size of 2
-        conv2 = tf.layers.max_pooling2d(conv2, 2, 2)
-
-        conv3 = tf.layers.conv2d(conv2, 32, 3, activation=tf.nn.relu)
-
-        # Flatten the data to a 1-D vector for the fully connected layer
-        fc1 = tf.contrib.layers.flatten(conv3)
-
-        # Fully connected layer (in tf contrib folder for now)
-        fc1 = tf.layers.dense(fc1, 1024)
+        fc1 = tf.layers.dense(feat, 256)
         # Apply Dropout (if is_training is False, dropout is not applied)
         fc1 = tf.layers.dropout(fc1, rate=dropout, training=is_training)
 
-        # Output layer, class prediction
-        out = tf.layers.dense(fc1, n_classes)
+        fc2 = tf.layers.dense(fc1, 128, activation=tf.nn.relu)
+
+        fc3 = tf.layers.dense(fc2, 64)
+        # Apply Dropout (if is_training is False, dropout is not applied)
+        fc3 = tf.layers.dropout(fc3, rate=dropout, training=is_training)
+
+        fc4 = tf.layers.dense(fc3, 32, activation=tf.nn.relu)
+        out = tf.layers.dense(fc4, 2)
 
     return out
 
+
+def kaggle_metric(labels, predictions):
+    """
+    A true positive is counted when a single predicted object matches a ground truth object with an IoU above the threshold. A false positive indicates a predicted object had no associated ground truth object. A false negative indicates a ground truth object had no associated predicted object.
+    """
+
+    threshes = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+    
+    bs = batch_size
+    labels = tf.reshape(labels, [bs, 101**2])
+    predictions = tf.cast(tf.reshape(predictions, [bs, 101**2]), dtype=tf.int32)
+    intx = tf.reduce_sum(tf.multiply(labels, predictions), axis=1)
+    union = tf.reduce_sum(tf.add(labels, predictions), axis=1)
+    iou = tf.divide(intx, union)
+    mask_present_gt = tf.minimum(tf.reduce_sum(labels, axis=1),1)
+    # these metrics methods return a tuple container
+    TP = tf.metrics.true_positives_at_thresholds(mask_present_gt, iou, threshes)[0] #  IoU above the threshold.
+    FP = tf.metrics.false_positives_at_thresholds(mask_present_gt, iou, threshes)[0] # predicted something, no gt.
+    FN = tf.metrics.false_negatives_at_thresholds(mask_present_gt, iou, threshes)[0] # gt but no prediction
+    precisions = tf.divide(TP, tf.add(TP,tf.add(FP, FN)))
+    avg_precision = tf.reduce_sum(precisions) / 10
+    pdb.set_trace()
+    return [precisions, avg_precision]
 
 # Define the model function (following TF Estimator Template)
 def model_fn(features, labels, mode):
     # Build the neural network
     # Because Dropout have different behavior at training and prediction time, we
     # need to create 2 distinct computation graphs that still share the same weights.
-    logits_train = conv_net(features, num_classes, dropout, reuse=False,
+    logits_train = pixel_net(features, dropout, reuse=False,
                             is_training=True)
-    logits_test = conv_net(features, num_classes, dropout, reuse=True,
+    logits_test = pixel_net(features, dropout, reuse=True,
                            is_training=False)
 
     # Predictions
@@ -190,17 +210,26 @@ def model_fn(features, labels, mode):
 
     # If prediction mode, early return
     if mode == tf.estimator.ModeKeys.PREDICT:
+        print('exiting  IN PREDICT MODE')
         return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
 
         # Define loss and optimizer
+    labels = tf.reshape(tf.cast(labels, dtype=tf.int32), [-1])
     loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits=logits_train, labels=tf.cast(labels, dtype=tf.int32)))
+        logits=logits_train, labels=labels))
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
     train_op = optimizer.minimize(loss_op,
                                   global_step=tf.train.get_global_step())
 
     # Evaluate the accuracy of the model
     acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
+    iou_op = tf.metrics.mean_iou(labels=labels, predictions=pred_classes, num_classes=2)
+
+    [precs, avg_prec] = kaggle_metric(labels, pred_classes)
+    threshes = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+    for i, t in enumerate(threshes):
+        tf.summary.scalar('prec_%.2f' % t, precs[i])
+    tf.summary.scalar('avg_prec', avg_prec)
 
     # TF Estimators requires to return a EstimatorSpec, that specify
     # the different ops for training, evaluating, ...
@@ -209,7 +238,7 @@ def model_fn(features, labels, mode):
         predictions=pred_classes,
         loss=loss_op,
         train_op=train_op,
-        eval_metric_ops={'accuracy': acc_op})
+        eval_metric_ops={'accuracy': acc_op, 'iou': iou_op})
 
     return estim_specs
 
@@ -236,44 +265,69 @@ def scat2d_eg():
     plt.show()
     pdb.set_trace()
 
+def pixel_eg():
+    x = tf.placeholder(tf.float32, shape=(8,117,117,1))
+    feat = pixel_net({'images': x}, dropout, reuse=False, is_training=True)
+
+    egbatch = np.random.rand(8,117,117,1)
+    # egbatch = egbatch[:8,:,:,:]
+
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+    
+    feed_dict = {x: egbatch}
+    myres = sess.run(feat, feed_dict)
+
 def get_salt_images(folder='mytrain'):
     image_list = []
     for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % folder): #assuming gif
         im=Image.open(filename).convert('L')
         npim = np.array(im, dtype=np.float32) / 255.0
-        npim_padded = np.pad(npim, ((6,6),(6,6)), 'reflect')
+        npim_padded = np.pad(npim, ((8,8),(8,8)), 'reflect')
         image_list.append(npim_padded)
         im.close()
     image_list = np.array(image_list)
     return np.expand_dims(image_list, -1)
 
+def get_salt_labels(folder='mytrain'):
+    image_list = []
+    for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/masks/*.png' % folder): #assuming gif
+        im=Image.open(filename).convert('L')
+        npim = np.array(im, dtype=int) / 255
+        image_list.append(npim.reshape(101**2))
+        im.close()
+    return np.array(image_list)
+
 def main():
 
     trainX = get_salt_images(folder='mytrain')
-    train_pix_num = sd.salt_pixel_num(folder='mytrain')
-    trainY = np.array(train_pix_num > 0).astype(int)
+    trainY = get_salt_labels(folder='mytrain')
 
     valX = get_salt_images(folder='myval')
-    val_pix_num = sd.salt_pixel_num(folder='myval')
-    valY = np.array(val_pix_num > 0).astype(int)
+    valY = get_salt_labels(folder='myval')
     # Build the Estimator
-    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1'
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': valX[:384,:,:,:]}, shuffle=False)
+    ge = model.predict(input_fn)
+    bob = next(ge)
+    pdb.set_trace()
 
     for i in range(100000):
         # Define the input function for training
         input_fn = tf.estimator.inputs.numpy_input_fn(
-            x={'images': trainX[:3584,:,:,:]}, y=trainY[:3584],
+            x={'images': trainX[:3584,:,:,:]}, y=trainY[:3584,:],
             batch_size=batch_size, num_epochs=1, shuffle=True)
         # Train the Model
-        tf.logging.set_verbosity(tf.logging.INFO)
+        # tf.logging.set_verbosity(tf.logging.INFO)
         model.train(input_fn, steps=None)
 
         if i % 25 == 0:
             # Evaluate the Model
             # Define the input function for evaluating
             input_fn = tf.estimator.inputs.numpy_input_fn(
-                x={'images': valX[:384,:,:,:]}, y=valY[:384],
+                x={'images': valX[:384,:,:,:]}, y=valY[:384,:],
                 batch_size=batch_size, shuffle=False)
             # Use the Estimator 'evaluate' method
             e = model.evaluate(input_fn)

@@ -33,12 +33,14 @@ def split_trainval(val_size=0.10):
         bin_train, bin_val =  train_test_split(myhist[mybin], test_size=val_size, random_state=42)
         train += bin_train
         val += bin_val
+    return [train, val]
 
+def copy_files(train, val):
     dataset_path = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset'
-    sX = '%s/train/images' % dataset_path
+    sX = '%s/train/images' % dataset_path # source
     tX = '%s/mytrain/images' % dataset_path
     vX = '%s/myval/images' % dataset_path
-    sY = '%s/train/masks' % dataset_path
+    sY = '%s/train/masks' % dataset_path # source
     tY = '%s/mytrain/masks' % dataset_path
     vY = '%s/myval/masks' % dataset_path
 

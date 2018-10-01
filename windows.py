@@ -215,6 +215,16 @@ def fst2d_phi_factory(kernel_size):
 
     return winO(1, kernel, [[0,0]], kernel_size)
 
+import matplotlib.pyplot as plt
+
 if __name__ == '__main__':
-    myres = fst2d_psi_factory([3,3])
-    pdb.set_trace()
+    psi = fst3d_psi_factory([3,9,9])
+    reshaped = np.transpose(psi.filters, [1,2,0,3])
+    fig, axes = plt.subplots(8, 16)
+    for col in range(8):
+        for row in range(16):
+            idx = col * 8 + row
+            axes[col, row].imshow(np.real(reshaped[:,:,:,idx]))
+            axes[col, row].axis('off')
+
+    plt.show()
