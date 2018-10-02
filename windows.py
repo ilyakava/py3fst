@@ -217,14 +217,35 @@ def fst2d_phi_factory(kernel_size):
 
 import matplotlib.pyplot as plt
 
-if __name__ == '__main__':
+def show_IP_fst_filters():
     psi = fst3d_psi_factory([3,9,9])
-    reshaped = np.transpose(psi.filters, [1,2,0,3])
+    reshaped = np.real(np.transpose(psi.filters, [1,2,0,3]))
     fig, axes = plt.subplots(8, 16)
     for col in range(8):
         for row in range(16):
-            idx = col * 8 + row
-            axes[col, row].imshow(np.real(reshaped[:,:,:,idx]))
+            idx = col * 16 + row
+            filt_img = reshaped[:,:,:,idx]
+            filt_img -= filt_img.min()
+            filt_img /= filt_img.max()
+            axes[col, row].imshow(reshaped[:,:,:,idx])
             axes[col, row].axis('off')
 
     plt.show()
+
+def show_wave_filters():
+    psi = tang_psi_factory(5, 5, [3,7,7])
+    reshaped = np.real(np.transpose(psi.filters, [1,2,0,3]))
+    fig, axes = plt.subplots(8, 16)
+    for col in range(8):
+        for row in range(16):
+            idx = col * 16 + row
+            if idx < 125:
+                filt_img = reshaped[:,:,:,idx]
+                filt_img -= filt_img.min()
+                filt_img /= filt_img.max()
+                axes[col, row].imshow(reshaped[:,:,:,idx])
+            axes[col, row].axis('off')
+
+    plt.show()
+if __name__ == '__main__':
+    show_IP_fst_filters()

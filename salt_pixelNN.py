@@ -16,12 +16,19 @@ from collections import namedtuple
 import itertools
 import glob
 import logging
+import os
 
 import numpy as np
 from PIL import Image
 import tensorflow as tf
+from tqdm import tqdm
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 import windows as win
+from rle import myrlestring
+from salt_baseline import clean_glob
 import salt_data as sd
 
 # import matplotlib.pyplot as plt
@@ -129,8 +136,6 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
 
         # filter and separate by original batch via old shape
         S0 = scat2d(x[:,6:-6, 6:-6, :], phi, layer_params[2])
-        print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
-        print(S0.get_shape())
         S0 = tf.reshape(S0, (bs, 1, S0.get_shape()[1], S0.get_shape()[2]))
         S1 = scat2d(U1[:,3:-3,3:-3,:], phi, layer_params[2])
         S1 = tf.reshape(S1, (bs, U1os[1], S1.get_shape()[1],S1.get_shape()[2]))
@@ -177,22 +182,37 @@ def kaggle_metric(labels, predictions):
     """
 
     threshes = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-    
+
     bs = batch_size
     labels = tf.reshape(labels, [bs, 101**2])
     predictions = tf.cast(tf.reshape(predictions, [bs, 101**2]), dtype=tf.int32)
+    
     intx = tf.reduce_sum(tf.multiply(labels, predictions), axis=1)
     union = tf.reduce_sum(tf.add(labels, predictions), axis=1)
-    iou = tf.divide(intx, union)
+    iou = tf.divide(intx, tf.add(union,1))
     mask_present_gt = tf.minimum(tf.reduce_sum(labels, axis=1),1)
     # these metrics methods return a tuple container
     TP = tf.metrics.true_positives_at_thresholds(mask_present_gt, iou, threshes)[0] #  IoU above the threshold.
     FP = tf.metrics.false_positives_at_thresholds(mask_present_gt, iou, threshes)[0] # predicted something, no gt.
     FN = tf.metrics.false_negatives_at_thresholds(mask_present_gt, iou, threshes)[0] # gt but no prediction
-    precisions = tf.divide(TP, tf.add(TP,tf.add(FP, FN)))
+    precisions = tf.divide(TP, tf.add(tf.add(TP,tf.add(FP, FN)),1))
     avg_precision = tf.reduce_sum(precisions) / 10
-    pdb.set_trace()
-    return [precisions, avg_precision]
+    return [precisions, TP, FP, FN, avg_precision]
+
+def summarize_metrics(metric_op, name, threshes):
+    """https://stackoverflow.com/a/50862530/2256243
+    """
+    shape = metric_op.shape.as_list()
+    if shape:  # this is a metric created with any of tf.metrics.*_at_thresholds
+        summary_components = tf.split(metric_op, shape[0])
+        for i, summary_component in enumerate(summary_components):
+            tf.summary.scalar(
+                name='{op_name}_{i}'.format(op_name=name, i=threshes[i]),
+                tensor=tf.squeeze(summary_component, axis=[0])
+            )
+    else:  # this already is a scalar metric operator
+        tf.summary.scalar(name=summary_components.name, tensor=metric_op)
+
 
 # Define the model function (following TF Estimator Template)
 def model_fn(features, labels, mode):
@@ -208,28 +228,48 @@ def model_fn(features, labels, mode):
     pred_classes = tf.argmax(logits_test, axis=1)
     pred_probas = tf.nn.softmax(logits_test)
 
+    notflat_pred_classes = tf.reshape(pred_classes, [batch_size, 101**2])
+
     # If prediction mode, early return
     if mode == tf.estimator.ModeKeys.PREDICT:
-        print('exiting  IN PREDICT MODE')
-        return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
+        predictions = {
+            'mask': notflat_pred_classes
+        }
+        return tf.estimator.EstimatorSpec(mode, predictions=predictions)
 
         # Define loss and optimizer
-    labels = tf.reshape(tf.cast(labels, dtype=tf.int32), [-1])
+    flat_labels = tf.reshape(tf.cast(labels, dtype=tf.int32), [-1])
     loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits=logits_train, labels=labels))
+        logits=logits_train, labels=flat_labels))
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
     train_op = optimizer.minimize(loss_op,
                                   global_step=tf.train.get_global_step())
 
     # Evaluate the accuracy of the model
-    acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-    iou_op = tf.metrics.mean_iou(labels=labels, predictions=pred_classes, num_classes=2)
+    acc_op = tf.metrics.accuracy(labels=flat_labels, predictions=pred_classes)
+    iou_op = tf.metrics.mean_iou(labels=flat_labels, predictions=pred_classes, num_classes=2)
 
-    [precs, avg_prec] = kaggle_metric(labels, pred_classes)
+    # kaggle spec
     threshes = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-    for i, t in enumerate(threshes):
-        tf.summary.scalar('prec_%.2f' % t, precs[i])
-    tf.summary.scalar('avg_prec', avg_prec)
+    labels = tf.cast(labels, dtype=tf.float32)
+    notflat_pred_classes = tf.cast(notflat_pred_classes, dtype=tf.float32)
+    intx = tf.reduce_sum(tf.multiply(labels, notflat_pred_classes), axis=1)
+    union = tf.reduce_sum(tf.add(labels, notflat_pred_classes), axis=1)
+    iou = tf.divide(intx, tf.add(union,1))
+    mask_present_gt = tf.minimum(tf.reduce_sum(labels, axis=1),1)
+
+    TP, TP_op = tf.metrics.true_positives_at_thresholds(mask_present_gt, iou, threshes) #  IoU above the threshold.
+    FP, FP_op = tf.metrics.false_positives_at_thresholds(mask_present_gt, iou, threshes) # predicted something, no gt.
+    FN, FN_op = tf.metrics.false_negatives_at_thresholds(mask_present_gt, iou, threshes) # gt but no prediction
+    prec, prec_op = tf.metrics.precision_at_thresholds(mask_present_gt, iou, threshes)
+
+    summarize_metrics(TP_op, 'TP', threshes)
+    summarize_metrics(FP_op, 'FP', threshes)
+    summarize_metrics(FN_op, 'FN', threshes)
+    summarize_metrics(prec_op, 'prec', threshes)
+
+    myevalops = {'2pxwise_accuracy': acc_op,
+    '2pxwise_iou': iou_op}
 
     # TF Estimators requires to return a EstimatorSpec, that specify
     # the different ops for training, evaluating, ...
@@ -238,7 +278,7 @@ def model_fn(features, labels, mode):
         predictions=pred_classes,
         loss=loss_op,
         train_op=train_op,
-        eval_metric_ops={'accuracy': acc_op, 'iou': iou_op})
+        eval_metric_ops=myevalops)
 
     return estim_specs
 
@@ -305,14 +345,9 @@ def main():
 
     valX = get_salt_images(folder='myval')
     valY = get_salt_labels(folder='myval')
-    # Build the Estimator
+    
     model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
-
-    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': valX[:384,:,:,:]}, shuffle=False)
-    ge = model.predict(input_fn)
-    bob = next(ge)
-    pdb.set_trace()
 
     for i in range(100000):
         # Define the input function for training
@@ -332,10 +367,133 @@ def main():
             # Use the Estimator 'evaluate' method
             e = model.evaluate(input_fn)
 
-            print("Testing Accuracy:", e['accuracy'])
+            # print("Testing Accuracy:", e['accuracy'])
+
+def eval_masks(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/myval/'):
+    valX = get_salt_images(folder='myval')
+    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
+    model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+    input_fn = tf.estimator.inputs.numpy_input_fn(
+                x={'images': valX[:384,:,:,:]},
+                batch_size=batch_size, shuffle=False)
+    gen = model.predict(input_fn)
+
+    for file_i, prediction in enumerate(tqdm(gen, total=384)):
+        p_label = prediction['mask']
+        pred = np.array(p_label).reshape((101,101))
+        plt.imsave(outpath+fileids[file_i], pred, cmap=cm.gray)
+
+    # now get the tail
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': valX[-32:,:,:,:]},
+        batch_size=batch_size, shuffle=False)
+    gen = model.predict(input_fn)
+    for file_i, prediction in enumerate(gen):
+        fileid = fileids[404-32+file_i]
+        
+        p_label = prediction['mask']
+        pred = np.array(p_label).reshape((101,101))
+        plt.imsave(outpath+fileid, pred, cmap=cm.gray)
+        
+def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/myval/'):
+    valX = get_salt_images(folder='myval')
+    valY = get_salt_labels(folder='myval')
+    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
+    
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
+    model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+    input_fn = tf.estimator.inputs.numpy_input_fn(
+                x={'images': valX[:384,:,:,:]},
+                batch_size=batch_size, shuffle=False)
+    gen = model.predict(input_fn)
+
+    threshes = np.array([0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95])
+    tps = np.zeros(threshes.shape[0])
+    fps = np.zeros(threshes.shape[0])
+    fns = np.zeros(threshes.shape[0])
+    def tp_fp_fn_calc(gt, predicted, tps, fps, fns):
+        component1 = np.array(predicted).astype(bool)
+        component2 = gt.astype(bool)
+
+        overlap = component1*component2 # Logical AND
+        union = component1 + component2 # Logical OR
+
+        iou = overlap.sum()/float(union.sum() + 1e-5)
+
+        mask_present_gt = np.any(gt > 0)
+        # these metrics methods return a tuple container
+        if mask_present_gt:
+            tps += (threshes < iou).astype(int)
+            if np.all(predicted < 1):
+                fns += np.ones(threshes.shape[0])
+        else:
+            fps += np.ones(threshes.shape[0])
+
+
+    for file_i, prediction in enumerate(tqdm(gen, total=384)):
+        p_label = prediction['mask']
+        tp_fp_fn_calc(valY[file_i,:], p_label, tps, fps, fns)
+
+    # now get the tail
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': valX[-32:,:,:,:]},
+        batch_size=batch_size, shuffle=False)
+    gen = model.predict(input_fn)
+    for file_i, prediction in enumerate(gen):
+        idx = 404-32+file_i
+        
+        p_label = prediction['mask']
+        tp_fp_fn_calc(valY[idx,:], p_label, tps, fps, fns)
+
+
+    precisions = tps / (tps+fps+fns)
+    avg_precision = precisions.sum() / threshes.shape[0]
+    
+    print('%d masks in dataset' % np.sum(valY.sum(axis=1) > 0))
+    for idx, thresh in enumerate(threshes):
+        print('tp at %f: %f' % (thresh, tps[idx]))
+        print('fp at %f: %f' % (thresh, fps[idx]))
+        print('fn at %f: %f' % (thresh, fns[idx]))
+        print('precisions at %f: %f' % (thresh, precisions[idx]))
+    print('avg precision: %f' % (avg_precision))
+
+
+
+def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/'):
+    testX = get_salt_images(folder='test')
+    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/test/images/*.png'))
+
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
+    model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': testX[:17984,:,:,:]},
+        batch_size=batch_size, shuffle=False)
+    gen = model.predict(input_fn)
+
+    with open(outpath+'binarypix1.csv','a') as fd:
+        fd.write('id,rle_mask\n')
+        for file_i, prediction in enumerate(tqdm(gen, total=17984)):
+            fileid, file_extension = os.path.splitext(fileids[file_i])
+            
+            p_label = prediction['mask']
+            pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2)
+            fd.write('%s,%s\n' % (fileid, myrlestring(pred)))
+
+        # now get the tail
+        input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': testX[-32:,:,:,:]},
+            batch_size=batch_size, shuffle=False)
+        gen = model.predict(input_fn)
+        for file_i, prediction in enumerate(gen):
+            if file_i >= 16:
+                fileid, file_extension = os.path.splitext(fileids[18000-32+file_i])
+            
+                p_label = prediction['mask']
+                pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2)
+                fd.write('%s,%s\n' % (fileid, myrlestring(pred)))
+
+
 
 if __name__ == '__main__':
-    main()
+    kaggle_summary()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)

@@ -43,7 +43,13 @@ def myrlestring(x):
 			out += ' %i %i' % (starts[idx], lengths[idx])
 	return out[1:]
 
+def test_myrlestring():
+	right = np.concatenate([np.ones((100,100)), np.zeros((100,100))])
+	left = np.concatenate([np.zeros((100,100)), np.ones((100,100))])
+	whole = np.concatenate([left, right],axis=1)
+	encoding = myrlestring(np.reshape(whole.transpose(), np.prod(whole.shape)))
+	pdb.set_trace()
+
 
 if __name__ == '__main__':
-	bob = np.array([0,0,0,1,1,1,0,1,1,1])
-	pdb.set_trace()
+	test_myrlestring()

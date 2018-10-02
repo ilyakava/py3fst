@@ -191,3 +191,18 @@ class ScrollThruPlot(object):
         # self.fig.colorbar(self.im)
         self.ax.set_ylabel('slice %s' % self.ind)
         self.im.axes.figure.canvas.draw()
+
+import os
+import scipy.io as sio
+
+DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
+
+def make_dataset_slice_plots():
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right.mat'))
+    data = mat_contents['Pavia_center_right'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    pdb.set_trace()
+    pyplot_slices(data[:,:,51], data[:,246,:], data[548,:,:], title=title)
+
+if __name__ == '__main__':
+    make_dataset_slice_plots()
