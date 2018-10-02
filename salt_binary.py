@@ -16,20 +16,24 @@ from collections import namedtuple
 import itertools
 import glob
 import logging
+import os
 
 import numpy as np
 from PIL import Image
 import tensorflow as tf
+from tqdm import tqdm
 
 import windows as win
 import salt_data as sd
+import salt_pixelNN as sNN
+import salt_baseline as sb
 
 import matplotlib.pyplot as plt
 import pdb
 
 # Training Parameters
 learning_rate = 0.001
-batch_size = 32
+batch_size = 8
 num_steps = 300
 
 # Network Parameters
@@ -87,7 +91,7 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
         # TF Estimator input is a dict, in case of multiple inputs
 
         # x = tf.reshape(x, shape=[-1, 113, 113, 1])
-        bs = x.get_shape()[0]
+        bs = batch_size
 
         psis[0] = win.fst2d_psi_factory([7, 7], include_avg=False)
         layer_params[0] = layerO((1,1), 'valid')
@@ -124,7 +128,7 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
 
         # each layer lo-passed differently so that (h,w) align bc we
         # want to be able to do 2d convolutions afterwards again
-        layer_params[2] = layerO((1,1), 'valid')
+        layer_params[2] = layerO((2,2), 'valid')
         phi = win.fst2d_phi_factory([5,5])
 
         # filter and separate by original batch via old shape
@@ -247,6 +251,43 @@ def get_salt_images(folder='mytrain'):
     image_list = np.array(image_list)
     return np.expand_dims(image_list, -1)
 
+def save_decisions():
+    """
+    change the first two vars to run on different sets
+    """
+    valX = get_salt_images(folder='test')
+    fileids = sb.clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/test/images/*.png'))
+    
+    setsize = len(fileids)
+    headsz = int(setsize / float(batch_size)) * batch_size
+
+    input_fn = tf.estimator.inputs.numpy_input_fn(
+                x={'images': valX[:headsz,:,:,:]},
+                batch_size=batch_size, shuffle=False)
+
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1'
+    bin_model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+    gen = bin_model.predict(input_fn)
+
+    id_to_pred = {}
+
+    for file_i, prediction in enumerate(tqdm(gen, total=headsz)):
+        fileid, file_extension = os.path.splitext(fileids[file_i])
+        id_to_pred[fileid] = prediction
+
+    # now get the tail
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'images': valX[-batch_size:,:,:,:]},
+        batch_size=batch_size, shuffle=False)
+    gen = bin_model.predict(input_fn)
+    for file_i, prediction in enumerate(gen):
+        idx = setsize-batch_size+file_i
+        fileid, file_extension = os.path.splitext(fileids[idx])
+        
+        id_to_pred[fileid] = prediction
+
+    np.save('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1/test_bin_pred', id_to_pred)
+
+
 def main():
 
     trainX = get_salt_images(folder='mytrain')
@@ -281,7 +322,7 @@ def main():
             print("Testing Accuracy:", e['accuracy'])
 
 if __name__ == '__main__':
-    main()
+    save_decisions()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)

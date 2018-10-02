@@ -28,7 +28,7 @@ import matplotlib.cm as cm
 
 import windows as win
 from rle import myrlestring
-from salt_baseline import clean_glob
+import salt_baseline as sb
 import salt_data as sd
 
 # import matplotlib.pyplot as plt
@@ -371,7 +371,7 @@ def main():
 
 def eval_masks(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/myval/'):
     valX = get_salt_images(folder='myval')
-    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
+    fileids = sb.clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
     model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
     input_fn = tf.estimator.inputs.numpy_input_fn(
@@ -398,7 +398,7 @@ def eval_masks(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predic
 def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/myval/'):
     valX = get_salt_images(folder='myval')
     valY = get_salt_labels(folder='myval')
-    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
+    fileids = sb.clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/myval/images/*.png'))
     
     model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
@@ -406,6 +406,8 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
                 x={'images': valX[:384,:,:,:]},
                 batch_size=batch_size, shuffle=False)
     gen = model.predict(input_fn)
+
+    id_to_pred = np.load('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1/myval_bin_pred.npy').tolist()
 
     threshes = np.array([0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95])
     tps = np.zeros(threshes.shape[0])
@@ -423,15 +425,20 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
         mask_present_gt = np.any(gt > 0)
         # these metrics methods return a tuple container
         if mask_present_gt:
-            tps += (threshes < iou).astype(int)
             if np.all(predicted < 1):
                 fns += np.ones(threshes.shape[0])
+            else:
+                tps += (threshes < iou).astype(int)
         else:
-            fps += np.ones(threshes.shape[0])
+            if np.any(predicted > 0):
+                fps += np.ones(threshes.shape[0])
 
 
     for file_i, prediction in enumerate(tqdm(gen, total=384)):
+        fileid, file_extension = os.path.splitext(fileids[file_i])
+
         p_label = prediction['mask']
+        p_label = np.array(p_label) #* id_to_pred[fileid]
         tp_fp_fn_calc(valY[file_i,:], p_label, tps, fps, fns)
 
     # now get the tail
@@ -440,8 +447,10 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
     gen = model.predict(input_fn)
     for file_i, prediction in enumerate(gen):
         idx = 404-32+file_i
+        fileid, file_extension = os.path.splitext(fileids[idx])
         
         p_label = prediction['mask']
+        p_label = np.array(p_label) #* id_to_pred[fileid]
         tp_fp_fn_calc(valY[idx,:], p_label, tps, fps, fns)
 
 
@@ -460,7 +469,7 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
 
 def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predictions/'):
     testX = get_salt_images(folder='test')
-    fileids = clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/test/images/*.png'))
+    fileids = sb.clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/test/images/*.png'))
 
     model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binarypix1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
@@ -469,13 +478,15 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
         batch_size=batch_size, shuffle=False)
     gen = model.predict(input_fn)
 
-    with open(outpath+'binarypix1.csv','a') as fd:
+    id_to_pred = np.load('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1/test_bin_pred.npy').tolist()
+
+    with open(outpath+'binarypix2.csv','a') as fd:
         fd.write('id,rle_mask\n')
         for file_i, prediction in enumerate(tqdm(gen, total=17984)):
             fileid, file_extension = os.path.splitext(fileids[file_i])
             
             p_label = prediction['mask']
-            pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2)
+            pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2) * id_to_pred[fileid]
             fd.write('%s,%s\n' % (fileid, myrlestring(pred)))
 
         # now get the tail
@@ -487,13 +498,13 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
                 fileid, file_extension = os.path.splitext(fileids[18000-32+file_i])
             
                 p_label = prediction['mask']
-                pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2)
+                pred = np.array(p_label).reshape((101,101)).transpose().reshape(101**2) * id_to_pred[fileid]
                 fd.write('%s,%s\n' % (fileid, myrlestring(pred)))
 
 
 
 if __name__ == '__main__':
-    kaggle_summary()
+    kaggle_test()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)
