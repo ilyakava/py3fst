@@ -276,9 +276,9 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None)
         print(end - start)
 
         if outfilename:
-            outfilename = os.path.join(DATA_PATH, outfilename)
+            nextoutfilename = os.path.join(DATA_PATH, outfilename)
         else:
-            outfilename = os.path.join(DATA_PATH, traintestfilename+'_pyFST3D_expt.mat')
+            nextoutfilename = os.path.join(DATA_PATH, traintestfilename+'_pyFST3D_expt.mat')
 
         # now test
         test_chunk_size = 1000
@@ -293,7 +293,7 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None)
             C += confusion_matrix(testY[i:i+test_chunk_size], p_label, labels=list(range(1,nlabels+1)))
 
             mat_outdata[u'metrics'][u'CM'] = C
-            hdf5storage.write(mat_outdata, filename=outfilename, matlab_compatible=True)
+            hdf5storage.write(mat_outdata, filename=nextoutfilename, matlab_compatible=True)
 
 def single_input_example():
     netO = IP_net()
@@ -327,25 +327,25 @@ if __name__ == '__main__':
     # labels = mat_contents['Smith_gt']
 
     # traintestfilenames = [ 'Smith_gt_traintest_p05_1_dd77f9.mat', 'Smith_gt_traintest_p05_2_e75152.mat', 'Smith_gt_traintest_p05_3_c8e897.mat', 'Smith_gt_traintest_p05_4_e2bd4d.mat', 'Smith_gt_traintest_p05_5_59815b.mat', 'Smith_gt_traintest_p05_6_316c37.mat', 'Smith_gt_traintest_p05_7_6aef72.mat', 'Smith_gt_traintest_p05_8_c24907.mat', 'Smith_gt_traintest_p05_9_3c2737.mat', 'Smith_gt_traintest_p05_10_75deb4.mat' ];
-    # hyper_run_acc(data, labels, Smith_net(), traintestfilenames[:1])
+    # hyper_run_acc(data, labels, Smith_net(), traintestfilenames[1:])
 
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
-    # data = mat_contents['salinas_corrected'].astype(np.float32)
-    # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
-    # labels = mat_contents['salinas_gt']
-
-    # traintestfilenames = [ 'Salinas_gt_traintest_p05_1_4228ee.mat', 'Salinas_gt_traintest_p05_2_eb1804.mat', 'Salinas_gt_traintest_p05_3_fad367.mat', 'Salinas_gt_traintest_p05_4_8cb8a3.mat', 'Salinas_gt_traintest_p05_5_d2384b.mat', 'Salinas_gt_traintest_p05_6_e34195.mat', 'Salinas_gt_traintest_p05_7_249774.mat', 'Salinas_gt_traintest_p05_8_f772c1.mat', 'Salinas_gt_traintest_p05_9_371ee5.mat', 'Salinas_gt_traintest_p05_10_22b46b.mat' ];
-    # hyper_run_acc(data, labels, IP_net(), traintestfilenames[:1])
-
-
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = mat_contents['KSC'].astype(np.float32)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
+    data = mat_contents['salinas_corrected'].astype(np.float32)
     data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    labels = mat_contents['KSC_gt']
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
+    labels = mat_contents['salinas_gt']
 
-    traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
+    traintestfilenames = [ 'Salinas_gt_traintest_p05_1_4228ee.mat', 'Salinas_gt_traintest_p05_2_eb1804.mat', 'Salinas_gt_traintest_p05_3_fad367.mat', 'Salinas_gt_traintest_p05_4_8cb8a3.mat', 'Salinas_gt_traintest_p05_5_d2384b.mat', 'Salinas_gt_traintest_p05_6_e34195.mat', 'Salinas_gt_traintest_p05_7_249774.mat', 'Salinas_gt_traintest_p05_8_f772c1.mat', 'Salinas_gt_traintest_p05_9_371ee5.mat', 'Salinas_gt_traintest_p05_10_22b46b.mat' ];
+    hyper_run_acc(data, labels, IP_net(), traintestfilenames[1:])
 
-    hyper_run_acc(data, labels, KSC_net2(), traintestfilenames[:1], 'kscnet2.mat')
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    # data = mat_contents['KSC'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    # labels = mat_contents['KSC_gt']
+
+    # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
+
+    # hyper_run_acc(data, labels, KSC_net2(), traintestfilenames[:1], 'kscnet2.mat')
     # hyper_run_acc(data, labels, KSC_net(False), traintestfilenames[:1], 'kscnet.mat')
