@@ -81,7 +81,7 @@ def scat2d(x, win_params, layer_params):
 
     return tf.abs(tf.complex(real1, imag1))
 
-def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
+def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE, bs=batch_size):
     """
     Args:
         x: in (batch, h, w, 1) shape
@@ -92,9 +92,6 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
     layer_params = [None,None,None]
     with tf.variable_scope('scat2d_to_2d_2layer', reuse=reuse):
         # TF Estimator input is a dict, in case of multiple inputs
-
-        # x = tf.reshape(x, shape=[-1, 113, 113, 1])
-        bs = batch_size
 
         psis[0] = win.fst2d_psi_factory([7, 7], include_avg=False)
         layer_params[0] = layerO((1,1), 'valid')
