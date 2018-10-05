@@ -81,7 +81,7 @@ def _get_cost(logits, y, cost_name="cross_entropy", regularizer=None):
     regularizer: power of the L2 regularizers added to the loss function
     """
     n_class = 2
-    y = tf.stack([tf.equal(y, 0), tf.equal(y, 1)], -1)
+    y = tf.stack([tf.cast(tf.equal(y, 0), dtype=tf.int32), tf.cast(tf.equal(y, 1), dtype=tf.int32)], -1)
     with tf.name_scope("cost"):
         flat_logits = tf.reshape(logits, [-1, n_class])
         flat_labels = tf.reshape(y, [-1, n_class])
@@ -116,7 +116,7 @@ def model_fn(features, labels, mode):
 
     # Predictions
     pred_probas = unetlay.pixel_wise_softmax(logits_test)
-    pred_classes = tf.cast(tf.argmax(pred_probas, axis=3), tf.int32)
+    pred_classes = tf.cast(tf.argmax(logits_test, axis=3), tf.int32)
 
     # If prediction mode, early return
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -128,7 +128,9 @@ def model_fn(features, labels, mode):
         # Define loss and optimizer
     labels = tf.cast(labels, dtype=tf.int32)
     square_labels = tf.reshape(labels, [-1, 104,104])
-    loss_op = _get_cost(logits_train, square_labels)
+    loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=square_labels, logits=logits_train))
+    # loss_op = _get_cost(logits_train, square_labels)
 
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
     train_op = optimizer.minimize(loss_op,
@@ -139,15 +141,20 @@ def model_fn(features, labels, mode):
     iou_op = tf.metrics.mean_iou(labels=square_labels, predictions=pred_classes, num_classes=2)
 
     mask_present_gt = tf.minimum(tf.reduce_sum(labels, axis=1),1)
-    mask_present_pred = tf.minimum(tf.reduce_sum(pred_classes, axis=(1,2)),1)
+    mask_pixel_count = tf.reduce_sum(pred_classes, axis=(1,2))
+    mask_present_pred = tf.minimum(mask_pixel_count,1)
     FP_op = tf.metrics.false_positives(mask_present_gt, mask_present_pred)
     FN_op = tf.metrics.false_negatives(mask_present_gt, mask_present_pred)
+    mask_predicted_rate_op = tf.metrics.mean(mask_present_pred)
+    mask_volume_op = tf.metrics.mean(mask_pixel_count)
 
     myevalops = {
     'accuracy': acc_op,
     'iou': iou_op,
-    'n_false_positives': FP_op,
-    'n_false_negatives': FN_op}
+    'mask_presence/false_positives': FP_op,
+    'mask_presence/false_negatives': FN_op,
+    'mask_presence/mask_prediction_rate': mask_predicted_rate_op,
+    'mask_presence/avg_mask_size': mask_volume_op}
 
     # kaggle spec
     threshes = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
@@ -156,8 +163,8 @@ def model_fn(features, labels, mode):
     iou = tf.divide(intx, tf.add(union,1))
     for thresh in threshes:
         hit_at_thresh = tf.cast(tf.greater(iou, thresh), tf.int32)
-        myevalops['tp_at_%.2f' % thresh] = tf.metrics.true_positives(mask_present_gt, hit_at_thresh)
-        myevalops['prec_at_%.2f' % thresh] = tf.metrics.precision(mask_present_gt, hit_at_thresh)
+        myevalops['true_positive/%.2f' % thresh] = tf.metrics.true_positives(mask_present_gt, hit_at_thresh)
+        myevalops['precision/%.2f' % thresh] = tf.metrics.precision(mask_present_gt, hit_at_thresh)
 
     with tf.name_scope("summaries"):
         for k in range(4):
@@ -211,13 +218,21 @@ def main():
     valX = get_salt_images(folder='myval')
     valY = get_salt_labels(folder='myval')
     
-    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/unet1d'
+    trainX = trainX[trainY.sum(axis=1) > 0]
+    trainY = trainY[trainY.sum(axis=1) > 0]
+    ts = batch_size * (trainY.shape[0] // batch_size)
+
+    valX = valX[valY.sum(axis=1) > 0]
+    valY = valY[valY.sum(axis=1) > 0]
+    vs = batch_size * (valY.shape[0] // batch_size)
+
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/unet2k'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
 
     for i in range(100000):
         # Define the input function for training
         input_fn = tf.estimator.inputs.numpy_input_fn(
-            x={'images': trainX[:3584,:,:,:]}, y=trainY[:3584,:],
+            x={'images': trainX[:ts,:,:,:]}, y=trainY[:ts,:],
             batch_size=batch_size, num_epochs=1, shuffle=True)
         # Train the Model
         # tf.logging.set_verbosity(tf.logging.INFO)
@@ -227,7 +242,7 @@ def main():
             # Evaluate the Model
             # Define the input function for evaluating
             input_fn = tf.estimator.inputs.numpy_input_fn(
-                x={'images': valX[:384,:,:,:]}, y=valY[:384,:],
+                x={'images': valX[:vs,:,:,:]}, y=valY[:vs,:],
                 batch_size=batch_size, shuffle=False)
             # Use the Estimator 'evaluate' method
             e = model.evaluate(input_fn)
