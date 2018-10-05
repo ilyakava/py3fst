@@ -526,9 +526,9 @@ def get_image_summary(img, idx=0):
     Make an image summary for 4d tensor image with index idx
     """
 
-    V = tf.slice(img, (0, 0, 0, idx), (1, -1, -1, 1))
+    V = tf.cast(tf.slice(img, (0, 0, 0, idx), (1, -1, -1, 1)), dtype=tf.float32)
     V -= tf.reduce_min(V)
-    V /= tf.reduce_max(V)
+    V /= tf.add(tf.reduce_max(V),1e-5)
     V *= 255
 
     img_w = tf.shape(img)[1]

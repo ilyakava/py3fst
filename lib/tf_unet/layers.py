@@ -44,6 +44,12 @@ def deconv2d(x, W,stride):
         output_shape = tf.stack([x_shape[0], x_shape[1]*2, x_shape[2]*2, x_shape[3]//2])
         return tf.nn.conv2d_transpose(x, W, output_shape, strides=[1, stride, stride, 1], padding='VALID', name="conv2d_transpose")
 
+def upsampleNN(x):
+    with tf.name_scope("upsampleNN"):
+        x_shape = tf.shape(x)
+        output_shape = tf.stack([x_shape[1]*2, x_shape[2]*2])
+        return tf.image.resize_nearest_neighbor(x, output_shape, name="resize_nearest_neightbor")
+
 def max_pool(x,n):
     return tf.nn.max_pool(x, ksize=[1, n, n, 1], strides=[1, n, n, 1], padding='VALID')
 
