@@ -40,110 +40,6 @@ num_steps = 300
 num_classes = 2 # MNIST total classes (0-9 digits)
 dropout = 0.25 # Dropout, probability to drop a unit
 
-layerO = namedtuple('layerO', ['strides', 'padding'])
-
-def scat2d(x, win_params, layer_params):
-    """Single layer of 2d scattering
-    Args:
-        x is input with dim (batch, height, width, 1)
-        win_params.filters is complex with dim ......... (depth, height, width, channels)
-    """
-    real1 = tf.layers.conv2d(
-        x,
-        win_params.nfilt,
-        win_params.kernel_size,
-        strides=layer_params.strides,
-        padding=layer_params.padding,
-        dilation_rate=(1,1),
-        activation=None,
-        use_bias=False,
-        kernel_initializer=tf.constant_initializer(win_params.filters.real, dtype=tf.float32),
-        trainable=False,
-        name=None
-    )
-
-    imag1 = tf.layers.conv2d(
-        x,
-        win_params.nfilt,
-        win_params.kernel_size,
-        strides=layer_params.strides,
-        padding=layer_params.padding,
-        dilation_rate=(1,1),
-        activation=None,
-        use_bias=False,
-        kernel_initializer=tf.constant_initializer(win_params.filters.imag, dtype=tf.float32),
-        trainable=False,
-        name=None
-    )
-
-    return tf.abs(tf.complex(real1, imag1))
-
-def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
-    """
-    Args:
-        x: in (batch, h, w, 1) shape
-    Returns
-        (batch, h, w, channels)
-    """
-    psis = [None,None]
-    layer_params = [None,None,None]
-    with tf.variable_scope('scat2d_to_2d_2layer', reuse=reuse):
-        # TF Estimator input is a dict, in case of multiple inputs
-
-        # x = tf.reshape(x, shape=[-1, 113, 113, 1])
-        bs = batch_size
-
-        psis[0] = win.fst2d_psi_factory([7, 7], include_avg=False)
-        layer_params[0] = layerO((1,1), 'valid')
-
-        # 107, 107
-        U1 = scat2d(x, psis[0], layer_params[0])
-
-        psis[1] = win.fst2d_psi_factory([7, 7], include_avg=False)
-        layer_params[1] = layerO((1,1), 'valid')
-
-        U2s = []
-        # only procede with increasing frequency paths
-        for res_i, used_params in enumerate(psis[0].filter_params):
-            increasing_psi = win.fst2d_psi_factory(psis[1].kernel_size, used_params)
-            if increasing_psi.nfilt > 0:
-                U2s.append(scat2d(U1[:,:,:,res_i:(res_i+1)], increasing_psi, layer_params[1]))
-        
-
-        # 101, 101
-        U2 = tf.concat(U2s, 3)
-        # swap to (batch, chanU2, h, w)
-        U2 = tf.transpose(U2, [0,3,1,2])
-        # reshape to (batch, h,w, 1)
-        U2os = U2.get_shape()
-        U2 = tf.reshape(U2, (bs*U2.get_shape()[1], U2.get_shape()[2],U2.get_shape()[3],1))
-
-        # swap to (batch, chanU1, h, w)
-        U1 = tf.transpose(U1, [0,3,1,2])
-        # reshape to (batch, h,w, 1)
-        U1os = U1.get_shape()
-        U1 = tf.reshape(U1, (bs*U1.get_shape()[1], U1.get_shape()[2], U1.get_shape()[3], 1))
-
-        # now lo-pass
-
-        # each layer lo-passed differently so that (h,w) align bc we
-        # want to be able to do 2d convolutions afterwards again
-        layer_params[2] = layerO((1,1), 'valid')
-        phi = win.fst2d_phi_factory([5,5])
-
-        # filter and separate by original batch via old shape
-        S0 = scat2d(x[:,6:-6, 6:-6, :], phi, layer_params[2])
-        S0 = tf.reshape(S0, (bs, 1, S0.get_shape()[1], S0.get_shape()[2]))
-        S1 = scat2d(U1[:,3:-3,3:-3,:], phi, layer_params[2])
-        S1 = tf.reshape(S1, (bs, U1os[1], S1.get_shape()[1],S1.get_shape()[2]))
-        S2 = scat2d(U2, phi, layer_params[2])
-        S2 = tf.reshape(S2, (bs, U2os[1], S2.get_shape()[1], S2.get_shape()[2]))
-
-        # (batch, chan, h,w)
-        feat2d = tf.concat([S0,S1,S2], 1)
-
-    return tf.transpose(feat2d, [0,2,3,1])
-
 # Create the neural network
 def conv_net(x_dict, n_classes, dropout, reuse, is_training):
     # Define a scope for reusing the variables
@@ -151,10 +47,8 @@ def conv_net(x_dict, n_classes, dropout, reuse, is_training):
         # TF Estimator input is a dict, like in MNIST example
         x = x_dict['images']
 
-        feat = scat2d_to_2d_2layer(x, reuse)
-
         # 1x1 conv replaces PCA step
-        conv1 = tf.layers.conv2d(feat, 64, 1)
+        conv1 = tf.layers.conv2d(x, 64, 1)
 
         # Convolution Layer with 64 filters and a kernel size of 3
         conv2 = tf.layers.conv2d(conv1, 64, 3, activation=tf.nn.relu, padding='same')
@@ -237,35 +131,13 @@ def model_fn(features, labels, mode):
 
     return estim_specs
 
-from window_plot import ScrollThruPlot
-
-def scat2d_eg():
-    x = tf.placeholder(tf.float32, shape=(8,113,113,1))
-    feat = scat2d_to_2d_2layer(x)
-
-    egbatch = get_salt_images()
-    egbatch = egbatch[:8,:,:,:]
-
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
-    
-    feed_dict = {x: egbatch}
-    myres = sess.run(feat, feed_dict)
-    files = glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/*.png')
-    # now lets look at them
-    X = myres[0,:,:,:]
-    fig, ax = plt.subplots(1, 1)
-    tracker = ScrollThruPlot(ax, X, fig)
-    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
-    plt.show()
-    pdb.set_trace()
 
 def get_salt_images(folder='mytrain'):
     image_list = []
     for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % folder): #assuming gif
         im=Image.open(filename).convert('L')
         npim = np.array(im, dtype=np.float32) / 255.0
-        npim_padded = np.pad(npim, ((10,9),(10,9)), 'reflect')
+        npim_padded = np.pad(npim, ((2,1),(2,1)), 'reflect')
         image_list.append(npim_padded)
         im.close()
     image_list = np.array(image_list)
@@ -318,7 +190,7 @@ def main():
     val_pix_num = sd.salt_pixel_num(folder='myval')
     valY = np.array(val_pix_num > 0).astype(int)
     # Build the Estimator
-    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary4'
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary_base1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
 
     for i in range(100000):
