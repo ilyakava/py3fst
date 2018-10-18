@@ -81,6 +81,24 @@ def salt_pixel_hist():
     plt.hist(a, bins='auto')  # arguments are passed to np.histogram
     plt.show()
 
+def get_salt_labels(folder='mytrain'):
+    image_list = []
+    for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/masks/*.png' % folder): #assuming gif
+        im=Image.open(filename).convert('L')
+        npim = np.array(im, dtype=int) / 255
+        image_list.append(npim.reshape(101**2))
+        im.close()
+    return np.array(image_list)
+
+def get_salt_images(folder='mytrain'):
+    image_list = []
+    for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % folder): #assuming gif
+        im=Image.open(filename).convert('L')
+        npim = np.array(im, dtype=np.float32) / 255.0
+        image_list.append(npim)
+        im.close()
+    return np.array(image_list)
+
 
 
 if __name__ == '__main__':
