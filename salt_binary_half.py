@@ -161,13 +161,13 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
         # x = tf.reshape(x, shape=[-1, 113, 113, 1])
         bs = batch_size
 
-        psis[0] = win.fst2d_psi_factory([17, 17], include_avg=False, filt_steps_ovr=[9, 9])
+        psis[0] = win.fst2d_psi_factory([7, 7], include_avg=False)
         layer_params[0] = layerO((1,1), 'valid')
 
         # 107, 107
         U1 = scat2d(x, psis[0], layer_params[0])
 
-        psis[1] = win.fst2d_psi_factory([17, 17], include_avg=False, filt_steps_ovr=[9, 9])
+        psis[1] = win.fst2d_psi_factory([7, 7], include_avg=False)
         layer_params[1] = layerO((1,1), 'valid')
 
         U2s = []
@@ -197,12 +197,12 @@ def scat2d_to_2d_2layer(x, reuse=tf.AUTO_REUSE):
         # each layer lo-passed differently so that (h,w) align bc we
         # want to be able to do 2d convolutions afterwards again
         layer_params[2] = layerO((1,1), 'valid')
-        phi = win.fst2d_phi_factory([7,7])
+        phi = win.fst2d_phi_factory([5,5])
 
         # filter and separate by original batch via old shape
-        S0 = scat2d(x[:,16:-16, 16:-16, :], phi, layer_params[2])
+        S0 = scat2d(x[:,6:-6, 6:-6, :], phi, layer_params[2])
         S0 = tf.reshape(S0, (bs, 1, S0.get_shape()[1], S0.get_shape()[2]))
-        S1 = scat2d(U1[:,8:-8,8:-8,:], phi, layer_params[2])
+        S1 = scat2d(U1[:,3:-3,3:-3,:], phi, layer_params[2])
         S1 = tf.reshape(S1, (bs, U1os[1], S1.get_shape()[1],S1.get_shape()[2]))
         S2 = scat2d(U2, phi, layer_params[2])
         S2 = tf.reshape(S2, (bs, U2os[1], S2.get_shape()[1], S2.get_shape()[2]))
@@ -218,9 +218,11 @@ def conv_net(x_dict, n_classes, dropout, reuse, is_training):
         # TF Estimator input is a dict, like in MNIST example
         x = x_dict['images']
 
+        x = tf.image.resize_images(x, [48,48], method=tf.image.ResizeMethod.BILINEAR)
+
         feat = scat2d_to_2d_2layer(x, reuse)
 
-        mlt = 4
+        mlt = 1
         # 1x1 conv replaces PCA step
         conv1 = tf.layers.conv2d(feat, 16*mlt, 1)
 
@@ -232,11 +234,11 @@ def conv_net(x_dict, n_classes, dropout, reuse, is_training):
         conv3 = tf.layers.conv2d(conv2, 32*mlt, 3, activation=tf.nn.relu, padding='same')
         conv3 = tf.layers.max_pooling2d(conv3, 2, 2) # 26
 
-        conv4 = tf.layers.conv2d(conv3, 64*mlt, 3, activation=tf.nn.relu, padding='same')
-        conv4 = tf.layers.max_pooling2d(conv4, 2, 2) # 13
+        # conv4 = tf.layers.conv2d(conv3, 64*mlt, 3, activation=tf.nn.relu, padding='same')
+        # conv4 = tf.layers.max_pooling2d(conv4, 2, 2) # 13
 
         # Flatten the data to a 1-D vector for the fully connected layer
-        fc1 = tf.contrib.layers.flatten(conv4)
+        fc1 = tf.contrib.layers.flatten(conv3)
 
         # Fully connected layer (in tf contrib folder for now)
         fc1 = tf.layers.dense(fc1, 1024*mlt)
@@ -308,36 +310,13 @@ def model_fn(features, labels, mode):
 
     return estim_specs
 
-from window_plot import ScrollThruPlot
-
-def scat2d_eg():
-    x = tf.placeholder(tf.float32, shape=(8,113,113,1))
-    feat = scat2d_to_2d_2layer(x)
-
-    egbatch = get_salt_images()
-    egbatch = egbatch[:8,:,:,:]
-
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
-    
-    feed_dict = {x: egbatch}
-    myres = sess.run(feat, feed_dict)
-    files = glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/*.png')
-    # now lets look at them
-    X = myres[0,:,:,:]
-    fig, ax = plt.subplots(1, 1)
-    tracker = ScrollThruPlot(ax, X, fig)
-    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
-    plt.show()
-    pdb.set_trace()
-
 def get_salt_images(folder='mytrain'):
     image_list = []
     for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % folder): #assuming gif
         im=Image.open(filename).convert('L')
         npim = np.array(im, dtype=np.float32) / 255.0
-        npim_padded = np.pad(npim, ((1,0),(1,0)), 'reflect')
-        image_list.append(npim_padded)
+        # npim_padded = np.pad(npim, ((1,0),(1,0)), 'reflect')
+        image_list.append(npim)
         im.close()
     image_list = np.array(image_list)
     return np.expand_dims(image_list, -1)
@@ -382,9 +361,11 @@ def get_decisions(foldername='test', model_dir=None, outfile=None):
 
     return id_to_pred
 
+from window_plot import ScrollThruPlot
+
 def view_mistakes():
     foldername = 'myval'
-    id_to_pred = get_decisions(foldername, '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary13b')
+    id_to_pred = get_decisions(foldername, '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binaryhalf1')
     fileids = sb.clean_glob(glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % foldername))
 
     # imgs = sd.get_salt_labels(folder='myval')
@@ -407,12 +388,6 @@ def view_mistakes():
     fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
     plt.show()
 
-
-def save_test_dec():
-    mymodel = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary13b'
-    myoutfile = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary13b/val_bin_pred.npy'
-    get_decisions(foldername='myval', model_dir=mymodel, outfile=myoutfile)
-
 def main():
 
     trainX = get_salt_images(folder='mytrain')
@@ -423,7 +398,7 @@ def main():
     val_pix_num = sd.salt_pixel_num(folder='myval')
     valY = np.array(val_pix_num > 0).astype(int)
     # Build the Estimator
-    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary13b'
+    model_dir = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binaryhalf1'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
 
     for i in range(100000):
@@ -447,7 +422,7 @@ def main():
         print("Testing Accuracy:", e['accuracy'])
 
 if __name__ == '__main__':
-    save_test_dec()
+    view_mistakes()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)

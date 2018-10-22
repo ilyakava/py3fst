@@ -280,22 +280,35 @@ def model_fn(features, labels, mode):
     return estim_specs
 
 from window_plot import ScrollThruPlot
+import scipy.io as sio
+DATA_PATH = '/scratch0/ilya/locDoc/data/hyperspec'
+DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
+from window_plot import pyplot_cube
 
 def scat2d_eg():
-    x = tf.placeholder(tf.float32, shape=(8,113,113,1))
-    feat = scat2d_to_2d_2layer(x)
 
-    egbatch = get_salt_images()
-    egbatch = egbatch[:8,:,:,:]
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
+    data = mat_contents['indian_pines_corrected'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    pdb.set_trace()
+    egbatch = np.expand_dims(data[:,:,108:109], 0)
+
+
+    x = tf.placeholder(tf.float32, shape=egbatch.shape)
+    feat = scat2d_to_2d_2layer(x, bs=1)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     
     feed_dict = {x: egbatch}
-    myres = sess.run(feat, feed_dict)
+    data = sess.run(feat, feed_dict)[0]
+    
+
+    pyplot_cube(data[:,-1,:], data[:,:,108], np.rot90(data[0,:,:]), title='title',resample_factor=1)
+
     files = glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/*.png')
     # now lets look at them
-    X = myres[0,:,:,:]
+    X = data
     fig, ax = plt.subplots(1, 1)
     tracker = ScrollThruPlot(ax, X, fig)
     fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
@@ -404,8 +417,7 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
                 batch_size=batch_size, shuffle=False)
     gen = model.predict(input_fn)
 
-    id_to_pred = np.load('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary1/myval_bin_pred.npy').tolist()
-
+    id_to_pred = np.load('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/models/binary13b/val_bin_pred.npy').tolist()
     threshes = np.array([0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95])
     tps = np.zeros(threshes.shape[0])
     fps = np.zeros(threshes.shape[0])
@@ -435,7 +447,7 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
         fileid, file_extension = os.path.splitext(fileids[file_i])
 
         p_label = prediction['mask']
-        p_label = np.array(p_label) #* id_to_pred[fileid]
+        p_label = np.array(p_label) * id_to_pred[fileid]
         tp_fp_fn_calc(valY[file_i,:], p_label, tps, fps, fns)
 
     # now get the tail
@@ -447,7 +459,7 @@ def kaggle_summary(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/pr
         fileid, file_extension = os.path.splitext(fileids[idx])
         
         p_label = prediction['mask']
-        p_label = np.array(p_label) #* id_to_pred[fileid]
+        p_label = np.array(p_label) * id_to_pred[fileid]
         tp_fp_fn_calc(valY[idx,:], p_label, tps, fps, fns)
 
 
@@ -501,7 +513,7 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
 
 
 if __name__ == '__main__':
-    kaggle_test()
+    kaggle_summary()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)

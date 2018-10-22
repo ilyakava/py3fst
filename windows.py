@@ -176,7 +176,7 @@ def fst3d_psi_window_3D(m1divM1, m2divM2, m3divM3, kernel_size):
 def fst3d_psi_window_3D_coordinate(m1divM1,m2divM2,m3divM3,x,y,b):
     return np.exp( 2*np.pi*1j*(m1divM1*x + m2divM2*y + m3divM3*b) )
 
-def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False):
+def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False, filt_steps_ovr=None):
     """
     Args:
         min_freq:
@@ -184,9 +184,11 @@ def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False):
     min_freq = np.array(min_freq)
     assert np.all(min_freq >= np.array([0,0])), 'some min freq < 0'
     assert np.all(min_freq < np.array([1,1])), 'some min freq >= 1'
+    if not filt_steps_ovr:
+        filt_steps_ovr = kernel_size
     filter_params = np.array(list(itertools.product(
-        np.linspace(0, 1, kernel_size[0], endpoint=False),
-        np.linspace(0, 1, kernel_size[1], endpoint=False)
+        np.linspace(0, 1, filt_steps_ovr[0], endpoint=False),
+        np.linspace(0, 1, filt_steps_ovr[1], endpoint=False)
     )))
     # never do any averaging
     if not include_avg:
