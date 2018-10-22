@@ -2,6 +2,8 @@
 *.html
 *.pyc
 doc/*
+*.mat
+.DS_Store
 
 #libsvm build files
 lib/libsvm/libsvm.so.2
