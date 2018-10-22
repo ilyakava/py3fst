@@ -2,3 +2,10 @@
 *.html
 *.pyc
 doc/*
+
+#libsvm build files
+lib/libsvm/libsvm.so.2
+lib/libsvm/svm-predict
+lib/libsvm/svm-scale
+lib/libsvm/svm-train
+lib/libsvm/svm.o
