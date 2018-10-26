@@ -5,6 +5,7 @@ from collections import namedtuple
 import itertools
 import time
 import os
+import random
 
 import h5py
 import hdf5storage
@@ -96,9 +97,9 @@ def IP_net(reuse=tf.AUTO_REUSE):
     return netO(model_fn, (24,24,6))
 
 def Bots_net(reuse=tf.AUTO_REUSE):
-    psi = win.fst3d_psi_factory([3,7,7])
-    phi = win.fst3d_phi_window_3D([3,7,7])
-    layer_params = layerO((3,1,1), 'valid')
+    psi = win.fst3d_psi_factory([7,7,7])
+    phi = win.fst3d_phi_window_3D([7,7,7])
+    layer_params = layerO((5,1,1), 'valid')
 
     def model_fn(x):
         """
@@ -108,7 +109,7 @@ def Bots_net(reuse=tf.AUTO_REUSE):
         return hyper3d_net(x, reuse=reuse, psis=[psi,psi],
             phi=phi, layer_params=[layer_params, layer_params, layer_params])
 
-    return netO(model_fn, (18,18,6))
+    return netO(model_fn, (18,18,18))
 
 def Smith_net(reuse=tf.AUTO_REUSE):
     """Fully described network.
@@ -138,7 +139,7 @@ def Smith_net(reuse=tf.AUTO_REUSE):
 def KSC_net(reuse=tf.AUTO_REUSE):
     psi = win.fst3d_psi_factory([7,7,7])
     phi = win.fst3d_phi_window_3D([7,7,7])
-    layer_params = layerO((7,1,1), 'valid')
+    layer_params = layerO((5,1,1), 'valid')
 
     def model_fn(x):
         """
@@ -219,7 +220,7 @@ def hyper3d_net(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None):
 
     return tf.concat([S0,S1,S2], 0)
 
-def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None):
+def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None, test_egs=None):
     """
     Args: data, image in (height, width, nbands) format
     """
@@ -253,6 +254,7 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None)
         
             feed_dict = {x: subimg}
             labelled_pix_feat[pixel_i,:] = sess.run(feat, feed_dict)
+    print('computing features now')
     compute_features()
 
     for traintestfilename in traintestfilenames:
@@ -260,16 +262,17 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None)
         train_mask = mat_contents['train_mask'].astype(int).squeeze()
         test_mask = mat_contents['test_mask'].astype(int).squeeze()
         # resize train/test masks to labelled pixels
+        # we have to index X differently than Y since only labelled feat are computed
         train_mask_skip_unlabelled = train_mask[flat_labels!=0]
         test_mask_skip_unlabelled = test_mask[flat_labels!=0]
 
         # get training set
-        trainY = flat_labels[train_mask==1]
-        trainX = labelled_pix_feat[train_mask_skip_unlabelled==1,:]
+        trainY = flat_labels[train_mask==1].tolist()
+        trainX = labelled_pix_feat[train_mask_skip_unlabelled==1,:].tolist()
 
         print('training now')
         start = time.time()
-        prob  = svm_problem(trainY.tolist(), trainX.tolist())
+        prob  = svm_problem(trainY, trainX)
         param = svm_parameter('-s 0 -t 0 -q')
         m = svm_train(prob, param)
         end = time.time()
@@ -283,17 +286,55 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None)
         # now test
         test_chunk_size = 1000
         testY = flat_labels[test_mask==1]
-        testX = labelled_pix_feat[test_mask_skip_unlabelled==1,:]
+
+        # we want to shuffle the feat and labels in the same order
+        # and be able to unshuffle the pred_labels afterwards
+        order = range(testY.shape[0]); random.shuffle(order)
+        # shuffle idxs into labelled feat
+        labelled_pix_feat_idxs = np.array(range(labelled_pix_feat.shape[0]))
+        test_labelled_pix_feat_idxs = labelled_pix_feat_idxs[test_mask_skip_unlabelled==1]
+        shuff_test_labelled_pix_feat_idxs = test_labelled_pix_feat_idxs[order]
+        # and shuffle test labels
+        shuff_test_labels = testY[order]
+        
+        shuff_test_pred_pix = np.zeros(testY.shape)
+
         C = np.zeros((nlabels,nlabels))
         print('testing now')
         mat_outdata = {}
         mat_outdata[u'metrics'] = {}
-        for i in tqdm(range(0,len(testY),test_chunk_size)):
-            p_label, p_acc, p_val = svm_predict(testY[i:i+test_chunk_size].tolist(), testX[i:i+test_chunk_size,:].tolist(), m, '-q');
-            C += confusion_matrix(testY[i:i+test_chunk_size], p_label, labels=list(range(1,nlabels+1)))
+        test_limit_egs = len(testY)
+        test_flags = '-q'
+        if test_egs:
+            test_limit_egs = test_egs
+            test_flags = ''
+        for i in tqdm(range(0,test_limit_egs,test_chunk_size)):
+            # populate test X
+            this_feat_idxs = shuff_test_labelled_pix_feat_idxs[i:i+test_chunk_size]
+            this_labs = shuff_test_labels[i:i+test_chunk_size].tolist()
+
+            p_label, p_acc, p_val = svm_predict(
+                this_labs,
+                labelled_pix_feat[this_feat_idxs].tolist(), m, test_flags);
+            shuff_test_pred_pix[i:i+test_chunk_size] = p_label
+            C += confusion_matrix(this_labs, p_label, labels=list(range(1,nlabels+1)))
 
             mat_outdata[u'metrics'][u'CM'] = C
             hdf5storage.write(mat_outdata, filename=nextoutfilename, matlab_compatible=True)
+
+        mat_outdata[u'true_image'] = flat_labels.reshape((width, height)).transpose()
+        # unshuffle predictions
+        Yhat = np.zeros(testY.shape)
+        for i, j in enumerate(order):
+            Yhat[j] = shuff_test_pred_pix[i]
+        # reshape Yhat to an image, and save for later comparison
+        pred_image = np.zeros(flat_labels.shape)
+        pred_image[test_mask==1] = Yhat
+        mat_outdata[u'pred_image'] = pred_image.reshape((width, height)).transpose()
+        hdf5storage.write(mat_outdata, filename=nextoutfilename, matlab_compatible=True)
+
+
+
 
 def single_input_example():
     netO = IP_net()
@@ -339,13 +380,21 @@ if __name__ == '__main__':
     # hyper_run_acc(data, labels, IP_net(), traintestfilenames[1:])
 
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = mat_contents['KSC'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    labels = mat_contents['KSC_gt']
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    # data = mat_contents['KSC'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    # labels = mat_contents['KSC_gt']
 
-    traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
+    # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
 
-    hyper_run_acc(data, labels, KSC_net2(), traintestfilenames[:1], 'kscnet2.mat')
+    # hyper_run_acc(data, labels, KSC_net2(), traintestfilenames[:1], 'kscnet2.mat')
     # hyper_run_acc(data, labels, KSC_net(False), traintestfilenames[:1], 'kscnet.mat')
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    data = mat_contents['Botswana'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
+    labels = mat_contents['Botswana_gt']
+    traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    hyper_run_acc(data, labels, Bots_net(), traintestfilenames[:1], 'botsnet.mat')
