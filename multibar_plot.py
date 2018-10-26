@@ -20,21 +20,27 @@ width = 0.15       # the width of the bars
 fig = plt.figure()
 ax = fig.add_subplot(111)
 
+mylim = 255.0
+mygray = (171/mylim,171/mylim,171/mylim)
+mygreen = (66/mylim,142/mylim,99/mylim)
+myyellow = (239/mylim,200/mylim,88/mylim)
+myred = (176/mylim,69/mylim,65/mylim)
+myblue = (121/mylim, 160/mylim, 240/mylim)
 
-rects1 = ax.bar(ind, class2-noisy2, width, color='r')
-plt.axhline(y=(class2-noisy2).mean(), color='r', linestyle='-')
+rects1 = ax.bar(ind, class2-noisy2, width, color=myblue)
+plt.axhline(y=(class2-noisy2).mean(), color=myblue, linestyle='-')
 
-rects2 = ax.bar(ind+width, pil2-noisy2, width, color='g')
-plt.axhline(y=(pil2-noisy2).mean(), color='g', linestyle='-')
+rects2 = ax.bar(ind+width, pil2-noisy2, width, color=myred)
+plt.axhline(y=(pil2-noisy2).mean(), color=myred, linestyle='-')
 
-rects3 = ax.bar(ind+width*2, class3-noisy3, width, color='b')
-plt.axhline(y=(class3-noisy3).mean(), color='b', linestyle='-')
+rects3 = ax.bar(ind+width*2, class3-noisy3, width, color=myyellow)
+plt.axhline(y=(class3-noisy3).mean(), color=myyellow, linestyle='-')
 
-rects4 = ax.bar(ind+width*3, pil3-noisy3, width, color='y')
-plt.axhline(y=(pil3-noisy3).mean(), color='y', linestyle='-')
+rects4 = ax.bar(ind+width*3, pil3-noisy3, width, color=mygreen)
+plt.axhline(y=(pil3-noisy3).mean(), color=mygreen, linestyle='-')
 
-rects5 = ax.bar(ind+width*4, class5-noisy5, width, color='c')
-plt.axhline(y=(class5-noisy5).mean(), color='c', linestyle='-')
+rects5 = ax.bar(ind+width*4, class5-noisy5, width, color=mygray)
+plt.axhline(y=(class5-noisy5).mean(), color=mygray, linestyle='-')
 
 ax.set_title('Median Gain Invariant SNR improvement')
 ax.set_ylabel('dB')
@@ -55,4 +61,5 @@ def autolabel(rects):
 # autolabel(rects4)
 # autolabel(rects5)
 ax.grid()
-plt.savefig('~/Desktop/icassp_plot.png')
+# plt.savefig('/cfarhomes/ilyak/Desktop/icassp_plot.png')
+plt.savefig('/Users/artsyinc/Desktop/icassp_plot.png')
