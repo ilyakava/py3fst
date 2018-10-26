@@ -22,14 +22,19 @@ ax = fig.add_subplot(111)
 
 
 rects1 = ax.bar(ind, class2-noisy2, width, color='r')
+plt.axhline(y=(class2-noisy2).mean(), color='r', linestyle='-')
 
 rects2 = ax.bar(ind+width, pil2-noisy2, width, color='g')
+plt.axhline(y=(pil2-noisy2).mean(), color='g', linestyle='-')
 
 rects3 = ax.bar(ind+width*2, class3-noisy3, width, color='b')
+plt.axhline(y=(class3-noisy3).mean(), color='b', linestyle='-')
 
 rects4 = ax.bar(ind+width*3, pil3-noisy3, width, color='y')
+plt.axhline(y=(pil3-noisy3).mean(), color='y', linestyle='-')
 
 rects5 = ax.bar(ind+width*4, class5-noisy5, width, color='c')
+plt.axhline(y=(class5-noisy5).mean(), color='c', linestyle='-')
 
 ax.set_title('Median Gain Invariant SNR improvement')
 ax.set_ylabel('dB')
@@ -50,4 +55,4 @@ def autolabel(rects):
 # autolabel(rects4)
 # autolabel(rects5)
 ax.grid()
-plt.show()
+plt.savefig('~/Desktop/icassp_plot.png')
