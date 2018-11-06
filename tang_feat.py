@@ -1,6 +1,5 @@
 """Just feature extraction
 """
-
 from collections import namedtuple
 import itertools
 import time
@@ -16,6 +15,8 @@ from sklearn.metrics import confusion_matrix
 
 from lib.libsvm.python.svmutil import *
 import windows as win
+
+import rgb_pixelNN as pxnn
 
 import pdb
 
@@ -313,8 +314,8 @@ def tang_run_accs():
     # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
 
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = mat_contents['KSC'].astype(np.float32)
-    data /= np.max(np.abs(data))
+    data = pxnn.remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
+    data = pxnn.normalize_channels(data)
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
     labels = mat_contents['KSC_gt']
 
@@ -339,6 +340,15 @@ def tang_run_accs():
 
     # datasettrainingfiles = [ 'Salinas_gt_traintest_p05_1_4228ee.mat', 'Salinas_gt_traintest_p05_2_eb1804.mat', 'Salinas_gt_traintest_p05_3_fad367.mat', 'Salinas_gt_traintest_p05_4_8cb8a3.mat', 'Salinas_gt_traintest_p05_5_d2384b.mat', 'Salinas_gt_traintest_p05_6_e34195.mat', 'Salinas_gt_traintest_p05_7_249774.mat', 'Salinas_gt_traintest_p05_8_f772c1.mat', 'Salinas_gt_traintest_p05_9_371ee5.mat', 'Salinas_gt_traintest_p05_10_22b46b.mat' ];
     # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    # data = mat_contents['Botswana'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
+    # labels = mat_contents['Botswana_gt']
+
+    # traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    # tang_run_acc(data, labels, traintestfilenames=traintestfilenames[:1])
 
 if __name__ == '__main__':
     tang_run_accs()

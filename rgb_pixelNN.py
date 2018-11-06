@@ -316,6 +316,46 @@ def scat2d_eg():
     plt.show()
     pdb.set_trace()
 
+def remove_img_intensity_gap(img):
+    pxvals_sorted = sorted(np.unique(img))
+    jump_idx = np.argmax(np.diff(pxvals_sorted))
+    low_intensity_max = pxvals_sorted[jump_idx]
+    hi_intensity_min = pxvals_sorted[jump_idx+1]
+    img[img > low_intensity_max] = img[img > low_intensity_max] - hi_intensity_min + low_intensity_max + 1
+    return img
+
+def remove_intensity_gaps_in_chans(cube):
+    for c_idx in range(cube.shape[2]):
+        cube[:,:,c_idx] = remove_img_intensity_gap(cube[:,:,c_idx])
+    return cube
+
+def normalize_channels(cube):
+    chan_maxes = np.expand_dims(np.expand_dims(np.max(np.max(cube,0),0),0),0)
+    cube /= chan_maxes
+    return cube
+
+def scroll_thru_hyper():
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    # data = mat_contents['Botswana'].astype(np.float32)
+    
+    pdb.set_trace()
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    data = remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
+    data = normalize_channels(data)
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
+    # data = mat_contents['indian_pines_corrected'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+
+    # now lets look at them
+    X = data
+    fig, ax = plt.subplots(1, 1)
+    tracker = ScrollThruPlot(ax, X, fig)
+    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
+    plt.show()
+
 def pixel_eg():
     x = tf.placeholder(tf.float32, shape=(8,117,117,1))
     feat = pixel_net({'images': x}, dropout, reuse=False, is_training=True)
@@ -515,7 +555,7 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
 
 
 if __name__ == '__main__':
-    scat2d_eg()
+    scroll_thru_hyper()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)

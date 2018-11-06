@@ -44,12 +44,12 @@ rects4 = ax.bar(ind+width*3, barhs4, width, color=mygreen)
 barhs5 = np.append(class5-noisy5, np.array([(class5-noisy5).mean()]))
 rects5 = ax.bar(ind+width*4, barhs5, width, color=mygray)
 
-ax.set_title('Median Scale Invariant SDR Improvement')
+# ax.set_title('Median Scale Invariant SDR Improvement')
 ax.set_ylabel('dB')
 ax.set_xticks(ind+width)
 ax.set_xticklabels( ('Acc', 'Pass', 'Idle', 'Horn', 'Steps', 'Avg') )
 ax.legend( (rects1[0], rects2[0], rects3[0], rects4[0], rects5[0]),
-	('Class-2', 'PIL-2', 'Class-3', 'PIL-3', 'Class-5') )
+	('Class-2', 'PF-2', 'Class-3', 'PF-3', 'Class-5') )
 
 def autolabel(rects):
     for rect in rects:

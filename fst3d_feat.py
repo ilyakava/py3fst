@@ -18,6 +18,8 @@ from sklearn.metrics import confusion_matrix
 from lib.libsvm.python.svmutil import *
 import windows as win
 
+import rgb_pixelNN as pxnn
+
 import pdb
 
 DATA_PATH = '/scratch0/ilya/locDoc/data/hyperspec'
@@ -97,19 +99,23 @@ def IP_net(reuse=tf.AUTO_REUSE):
     return netO(model_fn, (24,24,6))
 
 def Bots_net(reuse=tf.AUTO_REUSE):
-    psi = win.fst3d_psi_factory([7,7,7])
-    phi = win.fst3d_phi_window_3D([7,7,7])
-    layer_params = layerO((5,1,1), 'valid')
+    s = 11
+    psi1 = win.fst3d_psi_factory([3,s,s])
+    psi2 = win.fst3d_psi_factory([8,s,s])
+    phi = win.fst3d_phi_window_3D([8,s,s])
+    lp1 = layerO((1,1,1), 'valid')
+    lp2 = layerO((8,1,1), 'valid')
+    lp3 = layerO((8,1,1), 'valid')
 
     def model_fn(x):
         """
         Args:
             x: tf.placeholder in (height, width, nbands) format, shape must be (25,25,nbands+6)
         """
-        return hyper3d_net(x, reuse=reuse, psis=[psi,psi],
-            phi=phi, layer_params=[layer_params, layer_params, layer_params])
+        return hyper3d_net(x, reuse=reuse, psis=[psi1,psi2],
+            phi=phi, layer_params=[lp1, lp2, lp3])
 
-    return netO(model_fn, (18,18,18))
+    return netO(model_fn, ((s-1)*3,(s-1)*3,0))
 
 def Smith_net(reuse=tf.AUTO_REUSE):
     """Fully described network.
@@ -137,19 +143,23 @@ def Smith_net(reuse=tf.AUTO_REUSE):
     return netO(model_fn, (24,24,12))
 
 def KSC_net(reuse=tf.AUTO_REUSE):
-    psi = win.fst3d_psi_factory([7,7,7])
-    phi = win.fst3d_phi_window_3D([7,7,7])
-    layer_params = layerO((5,1,1), 'valid')
+    s = 11
+    psi1 = win.fst3d_psi_factory([3,s,s])
+    psi2 = win.fst3d_psi_factory([8,s,s])
+    phi = win.fst3d_phi_window_3D([8,s,s])
+    lp1 = layerO((1,1,1), 'valid')
+    lp2 = layerO((8,1,1), 'valid')
+    lp3 = layerO((8,1,1), 'valid')
 
     def model_fn(x):
         """
         Args:
             x: tf.placeholder in (height, width, nbands) format, shape must be (25,25,nbands+6)
         """
-        return hyper3d_net(x, reuse=reuse, psis=[psi,psi],
-            phi=phi, layer_params=[layer_params, layer_params, layer_params])
+        return hyper3d_net(x, reuse=reuse, psis=[psi1,psi2],
+            phi=phi, layer_params=[lp1, lp2, lp3])
 
-    return netO(model_fn, (18,18,12))
+    return netO(model_fn, ((s-1)*3,(s-1)*3,0))
 
 def KSC_net2(reuse=tf.AUTO_REUSE):
     psi = win.fst3d_psi_factory([3,9,9])
@@ -381,20 +391,20 @@ if __name__ == '__main__':
 
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    # data = mat_contents['KSC'].astype(np.float32)
-    # data /= np.max(np.abs(data))
+    # data = pxnn.remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
+    # data = pxnn.normalize_channels(data)
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
     # labels = mat_contents['KSC_gt']
 
     # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
 
-    # hyper_run_acc(data, labels, KSC_net2(), traintestfilenames[:1], 'kscnet2.mat')
-    # hyper_run_acc(data, labels, KSC_net(False), traintestfilenames[:1], 'kscnet.mat')
+    # hyper_run_acc(data, labels, KSC_net(), traintestfilenames[1:])
 
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
     data = mat_contents['Botswana'].astype(np.float32)
-    data /= np.max(np.abs(data))
+    # data /= np.max(np.abs(data))
+    data = pxnn.normalize_channels(data)
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
     labels = mat_contents['Botswana_gt']
     traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
-    hyper_run_acc(data, labels, Bots_net(), traintestfilenames[:1], 'botsnet.mat')
+    hyper_run_acc(data, labels, Bots_net(), traintestfilenames[1:])
