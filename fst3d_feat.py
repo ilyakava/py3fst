@@ -390,21 +390,19 @@ if __name__ == '__main__':
     # hyper_run_acc(data, labels, IP_net(), traintestfilenames[1:])
 
 
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    # data = pxnn.remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
-    # data = pxnn.normalize_channels(data)
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    # labels = mat_contents['KSC_gt']
-
-    # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
-
-    # hyper_run_acc(data, labels, KSC_net(), traintestfilenames[1:])
-
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
-    data = mat_contents['Botswana'].astype(np.float32)
-    # data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    data = pxnn.remove_img_intensity_overflow(mat_contents['KSC'].astype(np.float32))
     data = pxnn.normalize_channels(data)
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
-    labels = mat_contents['Botswana_gt']
-    traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
-    hyper_run_acc(data, labels, Bots_net(), traintestfilenames[1:])
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    labels = mat_contents['KSC_gt']
+
+    traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
+    hyper_run_acc(data, labels, KSC_net(), traintestfilenames)
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    # data = mat_contents['Botswana'].astype(np.float32)
+    # data = pxnn.normalize_channels(data)
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
+    # labels = mat_contents['Botswana_gt']
+    # traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    # hyper_run_acc(data, labels, Bots_net(), traintestfilenames[1:])

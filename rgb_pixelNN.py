@@ -324,9 +324,24 @@ def remove_img_intensity_gap(img):
     img[img > low_intensity_max] = img[img > low_intensity_max] - hi_intensity_min + low_intensity_max + 1
     return img
 
+def remove_img_intensity_overflow(img):
+    pxvals_sorted = sorted(np.unique(img))
+    jump_idx = np.argmax(np.diff(pxvals_sorted))
+    low_intensity_max = pxvals_sorted[jump_idx]
+    hi_intensity_min = pxvals_sorted[jump_idx+1]
+    if np.abs(img.max() - 2**16) < 5:
+        img[img > low_intensity_max] = img[img > low_intensity_max] - 2**16
+        img = img - img.min()
+    return img
+
 def remove_intensity_gaps_in_chans(cube):
     for c_idx in range(cube.shape[2]):
         cube[:,:,c_idx] = remove_img_intensity_gap(cube[:,:,c_idx])
+    return cube
+
+def remove_intensity_overflow_in_chans(cube):
+    for c_idx in range(cube.shape[2]):
+        cube[:,:,c_idx] = remove_img_intensity_overflow(cube[:,:,c_idx])
     return cube
 
 def normalize_channels(cube):
@@ -339,22 +354,30 @@ def scroll_thru_hyper():
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
     # data = mat_contents['Botswana'].astype(np.float32)
     
-    pdb.set_trace()
+    # pdb.set_trace()
 
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
+    data = remove_intensity_overflow_in_chans(mat_contents['KSC'].astype(np.float32))
     data = normalize_channels(data)
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
     # data = mat_contents['indian_pines_corrected'].astype(np.float32)
     # data /= np.max(np.abs(data))
 
-    # now lets look at them
-    X = data
     fig, ax = plt.subplots(1, 1)
-    tracker = ScrollThruPlot(ax, X, fig)
-    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
-    plt.show()
+    im = ax.imshow(data[:,:,0], cmap='gray')
+    for c_idx in range(data.shape[2]):
+        im.set_data(data[:,:,c_idx])
+        ax.set_ylabel('channel %d' % (c_idx+1))
+        plt.savefig('/scratch0/ilya/locDownloads/kscgif/%03d.png' % c_idx)
+        # plt.imsave('/scratch0/ilya/locDownloads/kscgif/%03d.png' % c_idx, data[:,:,c_idx], cmap=cm.gray)
+
+    # now lets look at them
+    # X = data
+    # fig, ax = plt.subplots(1, 1)
+    # tracker = ScrollThruPlot(ax, X, fig)
+    # fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
+    # plt.show()
 
 def pixel_eg():
     x = tf.placeholder(tf.float32, shape=(8,117,117,1))
