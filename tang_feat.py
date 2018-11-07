@@ -192,7 +192,7 @@ def tang_run_full_img(data, labels, groundtruthfilename='100p'):
     imgmatfiledata = {}
     imgmatfiledata[u'imgHat'] = pred_image
     imgmatfiledata[u'groundtruthfilename'] = groundtruthfilename
-    hdf5storage.write(imgmatfiledata, filename=groundtruthfilename+'_100p_train.mat', matlab_compatible=True)
+    hdf5storage.write(imgmatfiledata, filename=groundtruthfilename+'_100p_tang_fullimg.mat', matlab_compatible=True)
     print('done making img, run hundredpercent_img_figures.m')
 
 def tang_run_acc(data, labels, traintestfilenames=None):
@@ -270,29 +270,48 @@ def tang_run_all_full_imgs():
     # labels = mat_contents['indian_pines_gt']
     # tang_run(data, labels, groundtruthfilename='Indian_pines_gt')
 
-    # need paviaU
-
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = mat_contents['KSC'].astype(np.float32)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
+    data = mat_contents['paviaU'].astype(np.float32)
     data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    labels = mat_contents['KSC_gt']
-    tang_run(data, labels, groundtruthfilename='KSC_gt')
-
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
+    labels = mat_contents['paviaU_gt']
+    tang_run_full_img(data, labels, groundtruthfilename='PaviaU_gt')
 
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
     data = mat_contents['Botswana'].astype(np.float32)
     data /= np.max(np.abs(data))
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
     labels = mat_contents['Botswana_gt']
-    tang_run(data, labels, groundtruthfilename='Botswana_gt')
+    tang_run_full_img(data, labels, groundtruthfilename='Botswana_gt')
     
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
-    # data = mat_contents['Pavia_center_right'].astype(np.float32)
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    # data = mat_contents['KSC'].astype(np.float32)
     # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
-    # labels = mat_contents['Pavia_center_right_gt']
-    # tang_run(data, labels, groundtruthfilename='Pavia_center_right_gt')
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    # labels = mat_contents['KSC_gt']
+    # tang_run(data, labels, groundtruthfilename='KSC_gt')
+    
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
+    data = mat_contents['Pavia_center_right'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
+    labels = mat_contents['Pavia_center_right_gt']
+    tang_run_full_img(data, labels, groundtruthfilename='Pavia_center_right_gt')
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith.mat'))
+    data = mat_contents['Smith'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_gt.mat'))
+    labels = mat_contents['Smith_gt']
+    tang_run_full_img(data, labels, groundtruthfilename='Smith_gt')
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
+    data = mat_contents['salinas_corrected'].astype(np.float32)
+    data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
+    labels = mat_contents['salinas_gt']
+    tang_run_full_img(data, labels, groundtruthfilename='Salinas_gt')
+
 
 # datasettrainingfiles = [ 'Indian_pines_gt_traintest_1_1abefb.mat', 'Indian_pines_gt_traintest_2_0bccd7.mat', 'Indian_pines_gt_traintest_3_7b4f69.mat', 'Indian_pines_gt_traintest_4_eeba08.mat', 'Indian_pines_gt_traintest_5_d75e59.mat', 'Indian_pines_gt_traintest_6_3a9ebd.mat', 'Indian_pines_gt_traintest_7_cad093.mat', 'Indian_pines_gt_traintest_8_97b27f.mat', 'Indian_pines_gt_traintest_9_1e4231.mat', 'Indian_pines_gt_traintest_10_6d71a1.mat' ];
 # datasettrainingfiles = [ 'PaviaU_gt_traintest_1_334428.mat', 'PaviaU_gt_traintest_2_03ccd1.mat', 'PaviaU_gt_traintest_3_698d0c.mat', 'PaviaU_gt_traintest_4_7b2f96.mat', 'PaviaU_gt_traintest_5_8adc4a.mat', 'PaviaU_gt_traintest_6_b1ef2f.mat', 'PaviaU_gt_traintest_7_844918.mat', 'PaviaU_gt_traintest_8_16b8dc.mat', 'PaviaU_gt_traintest_9_e14191.mat', 'PaviaU_gt_traintest_10_c36f7c.mat' ];
