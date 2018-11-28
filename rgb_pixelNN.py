@@ -349,6 +349,65 @@ def normalize_channels(cube):
     cube /= chan_maxes
     return cube
 
+def hyper_rgb_sim():
+    cannon40d_wbgr_response = [
+        [370, 0.3,    0.3,  0.3],
+        [385, 1.425,  0,    0.35],
+        [400, 2.55,   0,    0.5],
+        [415, 3.675,  0,    0.55],
+        [430, 4.8,   0,    0.6],
+        [445, 5.,    0,      0.8],
+        [461, 4.28,   0.8 ,     0.5 ],
+        [477, 3.57,    1.6,      0],
+        [493, 2.85,    2.4,      0],
+        [509, 2.14,    3.2,      0],
+        [525, 1.42,    3.2,      0],
+        [541, 0.71,    3.3,      0],
+        [557, 0.0,    3.2,      1.1],
+        [573, 0,    2.5,      2.1],
+        [589, 0,    1.9,      2.7],
+        [605, 0,    1.28,      2.9],
+        [621, 0,    0.64,      2.7],
+        [637, 0.2,    0,      2.60],
+        [653, 0.35,    0,      2.50],
+        [669, 0.4,    0.09,      2.40],
+        [685, 0.3,    0.26,      2.30],
+        [701, 0.2,    0.35,      2.21],
+        [717, 0.15,    0.44,      2.11],
+        [733, 0.1,    0.53,      2.01],
+        [749, 0,    0.62,      1.91],
+        [765, 0,    0.71,      1.81],
+        [781, 0.3,    0.8,      1.72],
+        [797, 1.3,    0.8,      1.62],
+        [813, 1.5,    0.74,      1.52],
+        [829, 1.5,    0.69,      1.42],
+        [845, 1.3,    0.63,      1.33],
+        [861, 1.2,    0.58,      1.23],
+        [877, 1.1,    0.52,      1.13],
+        [893, 1,    0.47,      1.03],
+        [909, 0.8,    0.42,      0.93],
+        [925, 0.6,    0.36,      0.84],
+        [941, 0.5,    0.31,      0.74],
+        [957, 0.4,    0.25,      0.64],
+        [973, 0.3,    0.20,      0.54],
+        [989, 0.25,    0.15,      0.45]]
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith.mat'))
+    data = mat_contents['Smith'].astype(np.float32)
+
+    ratios = np.array(cannon40d_wbgr_response)[5:,:]
+    blue = np.expand_dims(np.sum(ratios[:,1] *data[:,:,:35],axis=2),-1)
+    green = np.expand_dims(np.sum(ratios[:,2] *data[:,:,:35],axis=2),-1)
+    red = np.expand_dims(np.sum(ratios[:,3] *data[:,:,:35],axis=2),-1)
+
+    color = normalize_channels(np.concatenate([red, green,blue], axis=2))
+
+    # plt.imshow(color)
+    plt.imsave('/scratch0/ilya/locDownloads/smith_color.png', color)
+
+
+    # pdb.set_trace()
+
 def scroll_thru_hyper():
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
@@ -356,28 +415,28 @@ def scroll_thru_hyper():
     
     # pdb.set_trace()
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = remove_intensity_overflow_in_chans(mat_contents['KSC'].astype(np.float32))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'HoustonU.mat'))
+    data = mat_contents['HoustonU'].astype(np.float32)
     data = normalize_channels(data)
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
     # data = mat_contents['indian_pines_corrected'].astype(np.float32)
     # data /= np.max(np.abs(data))
 
-    fig, ax = plt.subplots(1, 1)
-    im = ax.imshow(data[:,:,0], cmap='gray')
-    for c_idx in range(data.shape[2]):
-        im.set_data(data[:,:,c_idx])
-        ax.set_ylabel('channel %d' % (c_idx+1))
-        plt.savefig('/scratch0/ilya/locDownloads/kscgif/%03d.png' % c_idx)
+    # fig, ax = plt.subplots(1, 1)
+    # im = ax.imshow(data[:,:,0], cmap='gray')
+    # for c_idx in range(data.shape[2]):
+    #     im.set_data(data[:,:,c_idx])
+    #     ax.set_ylabel('channel %d' % (c_idx+1))
+    #     plt.savefig('/scratch0/ilya/locDownloads/kscgif/%03d.png' % c_idx)
         # plt.imsave('/scratch0/ilya/locDownloads/kscgif/%03d.png' % c_idx, data[:,:,c_idx], cmap=cm.gray)
 
     # now lets look at them
-    # X = data
-    # fig, ax = plt.subplots(1, 1)
-    # tracker = ScrollThruPlot(ax, X, fig)
-    # fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
-    # plt.show()
+    X = data
+    fig, ax = plt.subplots(1, 1)
+    tracker = ScrollThruPlot(ax, X, fig)
+    fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
+    plt.show()
 
 def pixel_eg():
     x = tf.placeholder(tf.float32, shape=(8,117,117,1))
@@ -578,7 +637,7 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
 
 
 if __name__ == '__main__':
-    scroll_thru_hyper()
+    hyper_rgb_sim()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)
