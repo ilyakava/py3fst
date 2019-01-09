@@ -415,9 +415,13 @@ def scroll_thru_hyper():
     
     # pdb.set_trace()
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'HoustonU.mat'))
-    data = mat_contents['HoustonU'].astype(np.float32)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_123chan.mat'))
+    data = mat_contents['Smith'].astype(np.float32)
     data = normalize_channels(data)
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'HoustonU.mat'))
+    # data = mat_contents['HoustonU'].astype(np.float32)
+    # data = normalize_channels(data)
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
     # data = mat_contents['indian_pines_corrected'].astype(np.float32)
@@ -637,7 +641,7 @@ def kaggle_test(outpath='/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/predi
 
 
 if __name__ == '__main__':
-    hyper_rgb_sim()
+    scroll_thru_hyper()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)
