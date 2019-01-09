@@ -12,6 +12,7 @@ import tensorflow as tf
 from tqdm import tqdm
 import scipy.io as sio
 from sklearn.metrics import confusion_matrix
+from sklearn.svm import SVC
 
 from lib.libsvm.python.svmutil import *
 import windows as win
@@ -146,7 +147,7 @@ def tang_run_full_img(data, labels, groundtruthfilename='100p'):
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
 
-    padded_data = np.pad(data, ((9,9),(9,9),(9,9)), 'wrap')
+    padded_data = np.pad(data, ((9,9),(9,9),(9,9)), 'reflect')
 
 
 
@@ -159,7 +160,7 @@ def tang_run_full_img(data, labels, groundtruthfilename='100p'):
     for pixel_i, pixel in enumerate(tqdm(labelled_pixels)):
         # this iterates through columns first
         [pixel_x, pixel_y] = pixel
-        subimg = padded_data[pixel_x:(pixel_x+19), pixel_y:(pixel_y+19), :]
+        subimg = padded_data[pixel_y:(pixel_y+19), pixel_x:(pixel_x+19), :]
     
         feed_dict = {x: subimg}
         labelled_pix_feat[pixel_i,:] = sess.run(feat, feed_dict)
@@ -167,26 +168,27 @@ def tang_run_full_img(data, labels, groundtruthfilename='100p'):
     flat_labels = labels.transpose().reshape(height*width)
     trainY = flat_labels[flat_labels!=0]
     
+    print('starting training')
     start = time.time()
-    prob  = svm_problem(trainY.tolist(), labelled_pix_feat.tolist())
-    param = svm_parameter('-s 0 -t 0 -q')
-    m = svm_train(prob, param)
+    clf = SVC(kernel='linear')
+    clf.fit(labelled_pix_feat, trainY)
     end = time.time()
     print(end - start)
 
     # now start predicting the full image, 1 column at a time
     col_feat = np.zeros((height, 271*nbands), dtype=np.float32)
     pred_image = np.zeros((height,width), dtype=int)
+    test_flags = '-q'
     for pixel_x in tqdm(range(width)):
         # get feat
         for pixel_y in range(height):
-            subimg = padded_data[pixel_x:(pixel_x+19), pixel_y:(pixel_y+19), :]
+            subimg = padded_data[pixel_y:(pixel_y+19), pixel_x:(pixel_x+19), :]
             feed_dict = {x: subimg}
             col_feat[pixel_y,:] = sess.run(feat, feed_dict)
     
         # get pred for feat
-        dontcare = [0] * height
-        p_label, p_acc, p_val = svm_predict(dontcare, col_feat.tolist(), m);
+        # dontcare = [0] * height
+        p_label = clf.predict(col_feat);
         pred_image[:,pixel_x] = np.array(p_label).astype(int)
 
     imgmatfiledata = {}
@@ -227,7 +229,11 @@ def tang_run_acc(data, labels, traintestfilenames=None):
     compute_features()
 
     for traintestfilename in traintestfilenames:
-        mat_contents = sio.loadmat(os.path.join(DATA_PATH, traintestfilename))
+        mat_contents = None
+        try:
+            mat_contents = sio.loadmat(os.path.join(DATA_PATH, traintestfilename))
+        except:
+            mat_contents = hdf5storage.loadmat(os.path.join(DATA_PATH, traintestfilename))
         train_mask = mat_contents['train_mask'].astype(int).squeeze()
         test_mask = mat_contents['test_mask'].astype(int).squeeze()
         # resize train/test masks to labelled pixels
@@ -240,9 +246,8 @@ def tang_run_acc(data, labels, traintestfilenames=None):
 
         print('training now')
         start = time.time()
-        prob  = svm_problem(trainY.tolist(), trainX.tolist())
-        param = svm_parameter('-s 0 -t 0 -q')
-        m = svm_train(prob, param)
+        clf = SVC(kernel='linear')
+        clf.fit(trainX, trainY)
         end = time.time()
         print(end - start)
 
@@ -253,13 +258,13 @@ def tang_run_acc(data, labels, traintestfilenames=None):
         C = np.zeros((nlabels,nlabels))
         print('testing now')
         for i in tqdm(range(0,len(testY),test_chunk_size)):
-            p_label, p_acc, p_val = svm_predict(testY[i:i+test_chunk_size].tolist(), testX[i:i+test_chunk_size,:].tolist(), m, '-q');
+            p_label = clf.predict(testX[i:i+test_chunk_size,:]);
             C += confusion_matrix(testY[i:i+test_chunk_size], p_label, labels=list(range(1,nlabels+1)))
 
         mat_outdata = {}
         mat_outdata[u'metrics'] = {}
         mat_outdata[u'metrics'][u'CM'] = C
-        hdf5storage.write(mat_outdata, filename=os.path.join(DATA_PATH, traintestfilename+'_WST3D_expt.mat'), matlab_compatible=True)
+        hdf5storage.write(mat_outdata, filename=os.path.join(DATA_PATH, traintestfilename+'_117_WST3D_expt.mat'), matlab_compatible=True)
 
 
 def tang_run_all_full_imgs():
@@ -268,49 +273,49 @@ def tang_run_all_full_imgs():
     # data /= np.max(np.abs(data))
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_gt.mat'))
     # labels = mat_contents['indian_pines_gt']
-    # tang_run(data, labels, groundtruthfilename='Indian_pines_gt')
+    # tang_run_full_img(data, labels, groundtruthfilename='Indian_pines_gt')
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
-    data = mat_contents['paviaU'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
-    labels = mat_contents['paviaU_gt']
-    tang_run_full_img(data, labels, groundtruthfilename='PaviaU_gt')
-
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
-    data = mat_contents['Botswana'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
-    labels = mat_contents['Botswana_gt']
-    tang_run_full_img(data, labels, groundtruthfilename='Botswana_gt')
-    
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    # data = mat_contents['KSC'].astype(np.float32)
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
+    # data = mat_contents['paviaU'].astype(np.float32)
     # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    # labels = mat_contents['KSC_gt']
-    # tang_run(data, labels, groundtruthfilename='KSC_gt')
-    
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
-    data = mat_contents['Pavia_center_right'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
-    labels = mat_contents['Pavia_center_right_gt']
-    tang_run_full_img(data, labels, groundtruthfilename='Pavia_center_right_gt')
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
+    # labels = mat_contents['paviaU_gt']
+    # tang_run_full_img(data, labels, groundtruthfilename='PaviaU_gt')
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith.mat'))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    # data = mat_contents['Botswana'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
+    # labels = mat_contents['Botswana_gt']
+    # tang_run_full_img(data, labels, groundtruthfilename='Botswana_gt')
+    
+    # # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    # # data = mat_contents['KSC'].astype(np.float32)
+    # # data /= np.max(np.abs(data))
+    # # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    # # labels = mat_contents['KSC_gt']
+    # # tang_run_full_img(data, labels, groundtruthfilename='KSC_gt')
+    
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
+    # data = mat_contents['Pavia_center_right'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
+    # labels = mat_contents['Pavia_center_right_gt']
+    # tang_run_full_img(data, labels, groundtruthfilename='Pavia_center_right_gt')
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_117chan.mat'))
     data = mat_contents['Smith'].astype(np.float32)
-    data /= np.max(np.abs(data))
+    data = pxnn.normalize_channels(data)
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_gt.mat'))
     labels = mat_contents['Smith_gt']
     tang_run_full_img(data, labels, groundtruthfilename='Smith_gt')
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
-    data = mat_contents['salinas_corrected'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
-    labels = mat_contents['salinas_gt']
-    tang_run_full_img(data, labels, groundtruthfilename='Salinas_gt')
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
+    # data = mat_contents['salinas_corrected'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
+    # labels = mat_contents['salinas_gt']
+    # tang_run_full_img(data, labels, groundtruthfilename='Salinas_gt')
 
 
 # datasettrainingfiles = [ 'Indian_pines_gt_traintest_1_1abefb.mat', 'Indian_pines_gt_traintest_2_0bccd7.mat', 'Indian_pines_gt_traintest_3_7b4f69.mat', 'Indian_pines_gt_traintest_4_eeba08.mat', 'Indian_pines_gt_traintest_5_d75e59.mat', 'Indian_pines_gt_traintest_6_3a9ebd.mat', 'Indian_pines_gt_traintest_7_cad093.mat', 'Indian_pines_gt_traintest_8_97b27f.mat', 'Indian_pines_gt_traintest_9_1e4231.mat', 'Indian_pines_gt_traintest_10_6d71a1.mat' ];
@@ -329,26 +334,46 @@ def tang_run_accs():
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
     # labels = mat_contents['Pavia_center_right_gt']
 
-    # datasettrainingfiles = [ 'Pavia_center_right_gt_traintest_1_c23379.mat', 'Pavia_center_right_gt_traintest_2_555d38.mat', 'Pavia_center_right_gt_traintest_3_436123.mat', 'Pavia_center_right_gt_traintest_4_392727.mat', 'Pavia_center_right_gt_traintest_5_da2b6f.mat', 'Pavia_center_right_gt_traintest_6_9848f9.mat', 'Pavia_center_right_gt_traintest_7_2e4963.mat', 'Pavia_center_right_gt_traintest_8_12c92f.mat', 'Pavia_center_right_gt_traintest_9_7593be.mat', 'Pavia_center_right_gt_traintest_10_30cc68.mat' ];
-    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
+    # # datasettrainingfiles = [ 'Pavia_center_right_gt_traintest_1_c23379.mat', 'Pavia_center_right_gt_traintest_2_555d38.mat', 'Pavia_center_right_gt_traintest_3_436123.mat', 'Pavia_center_right_gt_traintest_4_392727.mat', 'Pavia_center_right_gt_traintest_5_da2b6f.mat', 'Pavia_center_right_gt_traintest_6_9848f9.mat', 'Pavia_center_right_gt_traintest_7_2e4963.mat', 'Pavia_center_right_gt_traintest_8_12c92f.mat', 'Pavia_center_right_gt_traintest_9_7593be.mat', 'Pavia_center_right_gt_traintest_10_30cc68.mat' ];
+    # datasettrainingfiles = ['Pavia_center_right_gt_traintest_coarse_128px128p.mat','Pavia_center_right_gt_traintest_coarse_72px72p.mat','Pavia_center_right_gt_traintest_coarse_36px36p.mat']
+    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[:])
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
-    data = pxnn.remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
-    data = pxnn.normalize_channels(data)
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
-    labels = mat_contents['KSC_gt']
-
-    datasettrainingfiles = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
-    tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
-
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith.mat'))
-    # data = mat_contents['Smith'].astype(np.float32)
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
+    # data = mat_contents['indian_pines_corrected'].astype(np.float32)
     # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_gt.mat'))
-    # labels = mat_contents['Smith_gt']
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_gt.mat'))
+    # labels = mat_contents['indian_pines_gt']
 
-    # datasettrainingfiles = [ 'Smith_gt_traintest_p05_1_dd77f9.mat', 'Smith_gt_traintest_p05_2_e75152.mat', 'Smith_gt_traintest_p05_3_c8e897.mat', 'Smith_gt_traintest_p05_4_e2bd4d.mat', 'Smith_gt_traintest_p05_5_59815b.mat', 'Smith_gt_traintest_p05_6_316c37.mat', 'Smith_gt_traintest_p05_7_6aef72.mat', 'Smith_gt_traintest_p05_8_c24907.mat', 'Smith_gt_traintest_p05_9_3c2737.mat', 'Smith_gt_traintest_p05_10_75deb4.mat' ];
-    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
+    # datasettrainingfiles = ['Indian_pines_gt_traintest_coarse_14px14p.mat', 'Indian_pines_gt_traintest_coarse_6px6p.mat', 'Indian_pines_gt_traintest_coarse_10px10p.mat', 'Indian_pines_gt_traintest_coarse_12x12_add7s9.mat', 'Indian_pines_gt_traintest_coarse_12x12_skip7s9.mat']
+    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[:2])
+
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
+    # data = mat_contents['paviaU'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
+    # labels = mat_contents['paviaU_gt']
+
+    # datasettrainingfiles = ['PaviaU_gt_traintest_coarse_16px16p.mat', 'PaviaU_gt_traintest_coarse_32px32p.mat', 'PaviaU_gt_traintest_coarse_64px64p.mat', 'PaviaU_gt_traintest_coarse_128px128p.mat']
+    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[:])
+
+    # # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
+    # # data = pxnn.remove_intensity_gaps_in_chans(mat_contents['KSC'].astype(np.float32))
+    # # data = pxnn.normalize_channels(data)
+    # # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC_gt.mat'))
+    # # labels = mat_contents['KSC_gt']
+
+    # # datasettrainingfiles = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
+    # # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[:1])
+
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_117chan.mat'))
+    data = mat_contents['Smith'].astype(np.float32)
+    data = pxnn.normalize_channels(data)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_gt.mat'))
+    labels = mat_contents['Smith_gt']
+
+    datasettrainingfiles = [ 'Smith_gt_traintest_p05_1_dd77f9.mat', 'Smith_gt_traintest_p05_2_e75152.mat', 'Smith_gt_traintest_p05_3_c8e897.mat', 'Smith_gt_traintest_p05_4_e2bd4d.mat', 'Smith_gt_traintest_p05_5_59815b.mat', 'Smith_gt_traintest_p05_6_316c37.mat', 'Smith_gt_traintest_p05_7_6aef72.mat', 'Smith_gt_traintest_p05_8_c24907.mat', 'Smith_gt_traintest_p05_9_3c2737.mat', 'Smith_gt_traintest_p05_10_75deb4.mat' ];
+    # datasettrainingfiles = ['Smith_gt_traintest_coarse_18px18p.mat', 'Smith_gt_traintest_coarse_12px12p.mat']
+    tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles)
 
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_corrected.mat'))
@@ -357,8 +382,9 @@ def tang_run_accs():
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Salinas_gt.mat'))
     # labels = mat_contents['salinas_gt']
 
-    # datasettrainingfiles = [ 'Salinas_gt_traintest_p05_1_4228ee.mat', 'Salinas_gt_traintest_p05_2_eb1804.mat', 'Salinas_gt_traintest_p05_3_fad367.mat', 'Salinas_gt_traintest_p05_4_8cb8a3.mat', 'Salinas_gt_traintest_p05_5_d2384b.mat', 'Salinas_gt_traintest_p05_6_e34195.mat', 'Salinas_gt_traintest_p05_7_249774.mat', 'Salinas_gt_traintest_p05_8_f772c1.mat', 'Salinas_gt_traintest_p05_9_371ee5.mat', 'Salinas_gt_traintest_p05_10_22b46b.mat' ];
-    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:])
+    # # datasettrainingfiles = [ 'Salinas_gt_traintest_p05_1_4228ee.mat', 'Salinas_gt_traintest_p05_2_eb1804.mat', 'Salinas_gt_traintest_p05_3_fad367.mat', 'Salinas_gt_traintest_p05_4_8cb8a3.mat', 'Salinas_gt_traintest_p05_5_d2384b.mat', 'Salinas_gt_traintest_p05_6_e34195.mat', 'Salinas_gt_traintest_p05_7_249774.mat', 'Salinas_gt_traintest_p05_8_f772c1.mat', 'Salinas_gt_traintest_p05_9_371ee5.mat', 'Salinas_gt_traintest_p05_10_22b46b.mat' ];
+    # datasettrainingfiles = ['Salinas_gt_traintest_coarse_40px40p.mat', 'Salinas_gt_traintest_coarse_30px30p.mat', 'Salinas_gt_traintest_coarse_20px20p.mat', 'Salinas_gt_traintest_coarse_16x16.mat']
+    # tang_run_acc(data, labels, traintestfilenames=datasettrainingfiles[1:3])
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
     # data = mat_contents['Botswana'].astype(np.float32)
@@ -366,11 +392,14 @@ def tang_run_accs():
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
     # labels = mat_contents['Botswana_gt']
 
-    # traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    # # traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    # traintestfilenames = ['Botswana_gt_traintest_coarse_36px36p.mat', 'Botswana_gt_traintest_coarse_12px12p.mat']
     # tang_run_acc(data, labels, traintestfilenames=traintestfilenames[:1])
 
 if __name__ == '__main__':
-    tang_run_accs()
+    # tang_run_accs()
+    tang_run_all_full_imgs()
+    # now
 
     # pdb.set_trace()
 
