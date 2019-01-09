@@ -1,3 +1,5 @@
+"""Makes a kaggle metric displayable on tfboard
+"""
 import tensorflow as tf
 
 from tensorflow.python.training import distribute as distribute_lib

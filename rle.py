@@ -1,3 +1,6 @@
+"""run length encoding for kaggle
+"""
+
 from __future__ import division, print_function
 import itertools
 import numpy as np # linear algebra

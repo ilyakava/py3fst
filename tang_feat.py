@@ -1,4 +1,4 @@
-"""Just feature extraction
+"""WST-svm
 """
 from collections import namedtuple
 import itertools

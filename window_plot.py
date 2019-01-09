@@ -1,3 +1,8 @@
+"""Plotting code for cube shaped objects.
+
+Hyperspectral data and 3D filters
+"""
+
 import numpy as np
 
 import plotly.offline as py
@@ -272,6 +277,13 @@ def make_dataset_cube_plot():
     data /= np.max(np.abs(data))
     pyplot_cube(data[:,-1,:], data[:,:,51], np.rot90(data[0,:,:]), title='title',resample_factor=1)
     # top, right, left
+
+import windows as win
+
+def display_3dfilter():
+    cube = win.fst3d_psi_window_3D(0, 0, 1/7., [7,7,7])
+    cube = np.imag(cube)
+    pyplot_slices(cube[:,:,3], cube[:,3,:], cube[3,:,:])
 
 if __name__ == '__main__':
     make_dataset_slice_plots()

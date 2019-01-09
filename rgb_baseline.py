@@ -1,3 +1,7 @@
+"""ST-svm for rgb images
+
+used for Simmyride.
+"""
 from collections import namedtuple
 import itertools
 import glob

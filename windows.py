@@ -1,3 +1,7 @@
+"""Filter creation.
+
+3D especially for FST and WST
+"""
 
 from collections import namedtuple
 import itertools

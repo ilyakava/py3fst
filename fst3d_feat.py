@@ -1,4 +1,4 @@
-"""Just feature extraction
+"""FST-svm
 """
 
 from collections import namedtuple
