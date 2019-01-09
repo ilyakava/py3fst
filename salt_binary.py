@@ -17,6 +17,7 @@ import itertools
 import glob
 import logging
 import os
+import re
 
 import numpy as np
 from PIL import Image
@@ -31,6 +32,7 @@ import tang_feat as otf
 from kaggle_prec import kaggle_prec
 
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import pdb
 
 # Training Parameters
@@ -311,18 +313,22 @@ def model_fn(features, labels, mode):
 from window_plot import ScrollThruPlot
 
 def scat2d_eg():
+    files = glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/*.png')
+    # find a particular example of interest
+    cool_eg = '/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/0a1742c740.png'
+    cool_eg_idx = re.search(cool_eg, ''.join(files)).start() // len(cool_eg)
+
     x = tf.placeholder(tf.float32, shape=(8,113,113,1))
     feat = scat2d_to_2d_2layer(x)
 
     egbatch = get_salt_images()
-    egbatch = egbatch[:8,:,:,:]
+    egbatch = egbatch[cool_eg_idx:(cool_eg_idx+8),:,:,:]
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     
     feed_dict = {x: egbatch}
     myres = sess.run(feat, feed_dict)
-    files = glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/train/images/*.png')
     # now lets look at them
     X = myres[0,:,:,:]
     fig, ax = plt.subplots(1, 1)
@@ -331,12 +337,17 @@ def scat2d_eg():
     plt.show()
     pdb.set_trace()
 
+    plt.imsave('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/scat_eg/input.png', egbatch[0,:,:,0], cmap=cm.gray)
+    for c_idx in range(X.shape[2]):
+        plt.imsave('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/scat_eg/channels/%03d.png' % c_idx, X[:,:,c_idx], cmap=cm.gray)
+
+
 def get_salt_images(folder='mytrain'):
     image_list = []
     for filename in glob.glob('/scratch0/ilya/locDoc/data/kaggle-seismic-dataset/%s/images/*.png' % folder): #assuming gif
         im=Image.open(filename).convert('L')
         npim = np.array(im, dtype=np.float32) / 255.0
-        npim_padded = np.pad(npim, ((1,0),(1,0)), 'reflect')
+        npim_padded = np.pad(npim, ((12,0),(12,0)), 'reflect')
         image_list.append(npim_padded)
         im.close()
     image_list = np.array(image_list)
@@ -447,7 +458,7 @@ def main():
         print("Testing Accuracy:", e['accuracy'])
 
 if __name__ == '__main__':
-    save_test_dec()
+    scat2d_eg()
 
     # lets look at the result images with the scroll thru vis
     # then do the mnist like network on binary and see results (with PCA layer in between)
