@@ -15,3 +15,5 @@ lib/libsvm/svm-scale
 lib/libsvm/svm-train
 lib/libsvm/svm.o
 lib/libsvm/tools/*
+
+.ipynb_checkpoints/*

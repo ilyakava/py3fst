@@ -3,6 +3,7 @@
 
 from collections import namedtuple
 import itertools
+from itertools import product
 import time
 import os
 import random
@@ -98,6 +99,20 @@ def IP_net(reuse=tf.AUTO_REUSE):
             phi=phi, layer_params=[layer_params, layer_params, layer_params])
 
     return netO(model_fn, (24,24,6))
+
+def custom_net(s1=9, s2=9, e1=3, e2=3):
+    psi1 = win.fst3d_psi_factory([e1,s1,s1])
+    psi2 = win.fst3d_psi_factory([e2,s2,s2])
+    phi = win.fst3d_phi_window_3D([e2,s2,s2])
+    lp1 = layerO((min(e1,5),1,1), 'valid')
+    lp2 = layerO((min(e2,5),1,1), 'valid')
+    lp3 = layerO((min(e2,5),1,1), 'valid')
+
+    def model_fn(x):
+        return hyper3d_net(x, reuse=False, psis=[psi1,psi2],
+            phi=phi, layer_params=[lp1, lp2, lp3])
+
+    return netO(model_fn, (s1+s2+s2-3,s1+s2+s2-3,e1+e2+e2-3))
 
 def Bots_net(reuse=tf.AUTO_REUSE):
     s = 11
@@ -230,7 +245,7 @@ def hyper3d_net(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None):
         # convolve with phis
         S2 = scat3d(U2, phi, layer_params[2])
 
-        [p1h, p1w, p1b] = kernel_padding(psis[0].kernel_size)
+        [p1h, p1w, p1b] = kernel_padding(psis[1].kernel_size)
         [p2h, p2w, p2b] = kernel_padding(psis[0].kernel_size)
         p2h += p1h; p2w += p1w; p2b += p1b;
 
@@ -279,9 +294,17 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None,
         
             feed_dict = {x: subimg}
             labelled_pix_feat[pixel_i,:] = sess.run(feat, feed_dict)
+        sess.close()
+        tf.reset_default_graph()
+
     print('computing features now')
     compute_features()
 
+    #svm_params = [(10,-3),(9,-3),(8,-3),(7,-3),(6,-3),(5,-3),(4,-3),(10,-5),(9,-5),(8,-5),(7,-5),(6,-5),(10,-4),(9,-4),(8,-4),(7,-4),(6,-4),(5,-4),(10,-6),(9,-6),(8,-6),(7,-6),(5,-5),(4,-4),(6,-6)]
+    #for pow_C, pow_gamma in svm_params:
+    exp_OAs = []
+    expt_name =  'lin'
+    #print('starting experiment: %s' % expt_name)
     for traintestfilename in traintestfilenames:
         mat_contents = None
         try:
@@ -299,17 +322,15 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None,
         trainY = flat_labels[train_mask==1]
         trainX = labelled_pix_feat[train_mask_skip_unlabelled==1,:]
 
+
+        nextoutfilename = os.path.join(DATA_PATH, traintestfilename+'_pyFST3D_'+expt_name+'_expt.mat')
+
         print('starting training')
         start = time.time()
         clf = SVC(kernel='linear')
         clf.fit(trainX, trainY)
         end = time.time()
         print(end - start)
-
-        if outfilename:
-            nextoutfilename = os.path.join(DATA_PATH, outfilename)
-        else:
-            nextoutfilename = os.path.join(DATA_PATH, traintestfilename+'_pyFST3D_'+expt_name+'_expt.mat')
 
         # now test
         test_chunk_size = 1000
@@ -324,7 +345,7 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None,
         shuff_test_labelled_pix_feat_idxs = test_labelled_pix_feat_idxs[order]
         # and shuffle test labels
         shuff_test_labels = testY[order]
-        
+
         shuff_test_pred_pix = np.zeros(testY.shape)
 
         C = np.zeros((nlabels,nlabels))
@@ -346,6 +367,7 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None,
             mat_outdata[u'metrics'][u'CM'] = C
             hdf5storage.write(mat_outdata, filename=nextoutfilename, matlab_compatible=True)
 
+        exp_OAs.append(100*np.diagonal(C).sum() / C.sum())
         mat_outdata[u'true_image'] = flat_labels.reshape((width, height)).transpose()
         # unshuffle predictions
         Yhat = np.zeros(testY.shape)
@@ -356,6 +378,8 @@ def hyper_run_acc(data, labels, netO, traintestfilenames=None, outfilename=None,
         pred_image[test_mask==1] = Yhat
         mat_outdata[u'pred_image'] = pred_image.reshape((width, height)).transpose()
         hdf5storage.write(mat_outdata, filename=nextoutfilename, matlab_compatible=True)
+
+    print('ACC ACHIEVED ({}): {:.4f}'.format(expt_name, np.array(exp_OAs).mean()))
 
 def run_full_img(data, labels, netO, groundtruthfilename='100p'):
     """
@@ -451,26 +475,35 @@ def run_all_accs():
     
     takesome = []
 
-    traintestfilenames = [ 'Indian_pines_gt_traintest_p04_nozero_1_05cf41.mat', 'Indian_pines_gt_traintest_p04_nozero_2_ce4ce0.mat', 'Indian_pines_gt_traintest_p04_nozero_3_c2fb75.mat', 'Indian_pines_gt_traintest_p04_nozero_4_5d3141.mat', 'Indian_pines_gt_traintest_p04_nozero_5_0d824a.mat', 'Indian_pines_gt_traintest_p04_nozero_6_6e4725.mat', 'Indian_pines_gt_traintest_p04_nozero_7_3e6a00.mat', 'Indian_pines_gt_traintest_p04_nozero_8_957ed5.mat', 'Indian_pines_gt_traintest_p04_nozero_9_9eb6a2.mat', 'Indian_pines_gt_traintest_p04_nozero_10_76cc88.mat' ];
-    takesome += traintestfilenames
+    # traintestfilenames = [ 'Indian_pines_gt_traintest_p04_nozero_1_05cf41.mat', 'Indian_pines_gt_traintest_p04_nozero_2_ce4ce0.mat', 'Indian_pines_gt_traintest_p04_nozero_3_c2fb75.mat', 'Indian_pines_gt_traintest_p04_nozero_4_5d3141.mat', 'Indian_pines_gt_traintest_p04_nozero_5_0d824a.mat', 'Indian_pines_gt_traintest_p04_nozero_6_6e4725.mat', 'Indian_pines_gt_traintest_p04_nozero_7_3e6a00.mat', 'Indian_pines_gt_traintest_p04_nozero_8_957ed5.mat', 'Indian_pines_gt_traintest_p04_nozero_9_9eb6a2.mat', 'Indian_pines_gt_traintest_p04_nozero_10_76cc88.mat' ];
+    # takesome += traintestfilenames
     
-    traintestfilenames = [ 'Indian_pines_gt_traintest_p03_nozero_1_c162cc.mat', 'Indian_pines_gt_traintest_p03_nozero_2_2db4c5.mat', 'Indian_pines_gt_traintest_p03_nozero_3_4a0c9f.mat', 'Indian_pines_gt_traintest_p03_nozero_4_b293fe.mat', 'Indian_pines_gt_traintest_p03_nozero_5_40d425.mat', 'Indian_pines_gt_traintest_p03_nozero_6_58f5f9.mat', 'Indian_pines_gt_traintest_p03_nozero_7_c677ec.mat', 'Indian_pines_gt_traintest_p03_nozero_8_f53e55.mat', 'Indian_pines_gt_traintest_p03_nozero_9_3bdfbf.mat', 'Indian_pines_gt_traintest_p03_nozero_10_ef5555.mat' ];
-    takesome += traintestfilenames
+    # traintestfilenames = [ 'Indian_pines_gt_traintest_p03_nozero_1_c162cc.mat', 'Indian_pines_gt_traintest_p03_nozero_2_2db4c5.mat', 'Indian_pines_gt_traintest_p03_nozero_3_4a0c9f.mat', 'Indian_pines_gt_traintest_p03_nozero_4_b293fe.mat', 'Indian_pines_gt_traintest_p03_nozero_5_40d425.mat', 'Indian_pines_gt_traintest_p03_nozero_6_58f5f9.mat', 'Indian_pines_gt_traintest_p03_nozero_7_c677ec.mat', 'Indian_pines_gt_traintest_p03_nozero_8_f53e55.mat', 'Indian_pines_gt_traintest_p03_nozero_9_3bdfbf.mat', 'Indian_pines_gt_traintest_p03_nozero_10_ef5555.mat' ];
+    # takesome += traintestfilenames
 
-    traintestfilenames = [ 'Indian_pines_gt_traintest_p02_nozero_1_93e12e.mat', 'Indian_pines_gt_traintest_p02_nozero_2_06eda5.mat', 'Indian_pines_gt_traintest_p02_nozero_3_e27f64.mat', 'Indian_pines_gt_traintest_p02_nozero_4_5268bc.mat', 'Indian_pines_gt_traintest_p02_nozero_5_9d0774.mat', 'Indian_pines_gt_traintest_p02_nozero_6_733c26.mat', 'Indian_pines_gt_traintest_p02_nozero_7_4696af.mat', 'Indian_pines_gt_traintest_p02_nozero_8_cc878b.mat', 'Indian_pines_gt_traintest_p02_nozero_9_351667.mat', 'Indian_pines_gt_traintest_p02_nozero_10_f7cbbe.mat' ];
-    takesome += traintestfilenames
+    # traintestfilenames = [ 'Indian_pines_gt_traintest_p02_nozero_1_93e12e.mat', 'Indian_pines_gt_traintest_p02_nozero_2_06eda5.mat', 'Indian_pines_gt_traintest_p02_nozero_3_e27f64.mat', 'Indian_pines_gt_traintest_p02_nozero_4_5268bc.mat', 'Indian_pines_gt_traintest_p02_nozero_5_9d0774.mat', 'Indian_pines_gt_traintest_p02_nozero_6_733c26.mat', 'Indian_pines_gt_traintest_p02_nozero_7_4696af.mat', 'Indian_pines_gt_traintest_p02_nozero_8_cc878b.mat', 'Indian_pines_gt_traintest_p02_nozero_9_351667.mat', 'Indian_pines_gt_traintest_p02_nozero_10_f7cbbe.mat' ];
+    # takesome += traintestfilenames
 
-    traintestfilenames = [ 'Indian_pines_gt_traintest_p01_nozero_1_556ea4.mat', 'Indian_pines_gt_traintest_p01_nozero_2_6c358d.mat', 'Indian_pines_gt_traintest_p01_nozero_3_d5e750.mat', 'Indian_pines_gt_traintest_p01_nozero_4_2e12e8.mat', 'Indian_pines_gt_traintest_p01_nozero_5_d6b184.mat', 'Indian_pines_gt_traintest_p01_nozero_6_d9d30c.mat', 'Indian_pines_gt_traintest_p01_nozero_7_f3c39c.mat', 'Indian_pines_gt_traintest_p01_nozero_8_c16774.mat', 'Indian_pines_gt_traintest_p01_nozero_9_b6715b.mat', 'Indian_pines_gt_traintest_p01_nozero_10_8bc7e5.mat' ];
-    takesome += traintestfilenames
+    # traintestfilenames = [ 'Indian_pines_gt_traintest_p01_nozero_1_556ea4.mat', 'Indian_pines_gt_traintest_p01_nozero_2_6c358d.mat', 'Indian_pines_gt_traintest_p01_nozero_3_d5e750.mat', 'Indian_pines_gt_traintest_p01_nozero_4_2e12e8.mat', 'Indian_pines_gt_traintest_p01_nozero_5_d6b184.mat', 'Indian_pines_gt_traintest_p01_nozero_6_d9d30c.mat', 'Indian_pines_gt_traintest_p01_nozero_7_f3c39c.mat', 'Indian_pines_gt_traintest_p01_nozero_8_c16774.mat', 'Indian_pines_gt_traintest_p01_nozero_9_b6715b.mat', 'Indian_pines_gt_traintest_p01_nozero_10_8bc7e5.mat' ];
+    # takesome += traintestfilenames
 
     # traintestfilenames = ['Indian_pines_gt_traintest_p05_1_f0b0f8.mat', 'Indian_pines_gt_traintest_p05_2_2c7710.mat', 'Indian_pines_gt_traintest_p05_3_dd1c2c.mat', 'Indian_pines_gt_traintest_p05_4_c44ed3.mat', 'Indian_pines_gt_traintest_p05_5_96acac.mat', 'Indian_pines_gt_traintest_p05_6_c99119.mat', 'Indian_pines_gt_traintest_p05_7_5c222a.mat', 'Indian_pines_gt_traintest_p05_8_a09f39.mat', 'Indian_pines_gt_traintest_p05_9_6e41d3.mat', 'Indian_pines_gt_traintest_p05_10_801219.mat' ]
     # takesome += traintestfilenames
 
-    # traintestfilenames = [ 'Indian_pines_gt_traintest_ma2015_1_9146f0.mat', 'Indian_pines_gt_traintest_ma2015_2_692f24.mat', 'Indian_pines_gt_traintest_ma2015_3_223f7e.mat', 'Indian_pines_gt_traintest_ma2015_4_447c47.mat', 'Indian_pines_gt_traintest_ma2015_5_82c5ad.mat', 'Indian_pines_gt_traintest_ma2015_6_a46a51.mat', 'Indian_pines_gt_traintest_ma2015_7_be4864.mat', 'Indian_pines_gt_traintest_ma2015_8_dacd43.mat', 'Indian_pines_gt_traintest_ma2015_9_962bab.mat', 'Indian_pines_gt_traintest_ma2015_10_f03ef8.mat']
-    # # takesome += traintestfilenames
+    traintestfilenames = [ 'Indian_pines_gt_traintest_ma2015_1_9146f0.mat', 'Indian_pines_gt_traintest_ma2015_2_692f24.mat', 'Indian_pines_gt_traintest_ma2015_3_223f7e.mat', 'Indian_pines_gt_traintest_ma2015_4_447c47.mat', 'Indian_pines_gt_traintest_ma2015_5_82c5ad.mat', 'Indian_pines_gt_traintest_ma2015_6_a46a51.mat', 'Indian_pines_gt_traintest_ma2015_7_be4864.mat', 'Indian_pines_gt_traintest_ma2015_8_dacd43.mat', 'Indian_pines_gt_traintest_ma2015_9_962bab.mat', 'Indian_pines_gt_traintest_ma2015_10_f03ef8.mat']
+    takesome += traintestfilenames
 
-    hyper_run_acc(data, labels, IP_net(), takesome)
-
+    #hyper_run_acc(data, labels, IP_net(), takesome)
+    
+    #custom_net(s1=9, s2=9, s3=9, e1=3, e2=3, e3=3, d1=3, d2=3, d3=3, reuse=tf.AUTO_REUSE)
+    #params = list(product(*[[7,9,11],[7,9,11],[3,5,7],[3,5,7]]))
+    # params = [(9,9,3,3),(9,11,3,3),(11,9,3,3),(11,11,3,3),(9,9,5,3),(9,11,5,3),(11,9,5,3),(11,11,5,3),(7,9,7,7),(9,11,7,7),(11,13,3,3),(13,11,3,3),(13,13,3,3),(11,13,5,3),(13,11,5,3),(13,13,5,3)]
+    # for param in params:
+    #     print('running: {}'.format(param))
+    #     hyper_run_acc(data, labels, custom_net(*param), takesome)
+    #     tf.reset_default_graph()
+    hyper_run_acc(data, labels, custom_net(*(11, 11, 5, 3) ), takesome)
+     
     # tf.reset_default_graph()
 
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Smith_117chan.mat'))
