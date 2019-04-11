@@ -35,10 +35,10 @@ DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
 
 # Training Parameters
 learning_rate = 0.0001
-batch_size = 8
+batch_size = 32
 num_steps = 300
-N_TEST = 128
-N_TRAIN = 256
+N_TEST = 2048
+N_TRAIN = 1792
 
 # Network Parameters
 n_classes=0
@@ -105,10 +105,10 @@ def scat3d_to_3d_3x3_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         S1 = fst.scat3d(U1[:,(p1b):-(p1b),(p1h):-(p1h), (p1w):-(p1w), :], phi, layer_params[2])
         S0 = fst.scat3d(x[:, (p2b):-(p2b),(p2h):-(p2h), (p2w):-(p2w), :], phi, layer_params[2])
 
-        # average across bands
-        S0 = tf.reduce_mean(S0,1,keepdims=True)
-        S1 = tf.reduce_mean(S1,1,keepdims=True)
-        S2 = tf.reduce_mean(S2,1,keepdims=True)
+        # just to get the size down to 1
+        S0 = tf.reduce_max(S0,1,keepdims=True)
+        S1 = tf.reduce_max(S1,1,keepdims=True)
+        S2 = tf.reduce_max(S2,1,keepdims=True)
 
         SX = tf.squeeze(tf.concat([S0,S1,S2], 0))
         # SX is (channels, h, w)
@@ -188,12 +188,12 @@ def get_train_test_data():
     global n_classes
     reuse = tf.AUTO_REUSE
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
-    data = mat_contents['Pavia_center_right'].astype(np.float32)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
+    data = mat_contents['paviaU'].astype(np.float32)
     data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
-    labels = mat_contents['Pavia_center_right_gt']
-    traintestfilename = 'Pavia_center_right_gt_traintest_coarse_128px128p.mat'
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
+    labels = mat_contents['paviaU_gt']
+    traintestfilename = 'PaviaU_gt_traintest_s200_1_591636.mat'
 
     netO = fst.Pavia_net()
     # from pavia net
@@ -277,6 +277,7 @@ def main():
     
     model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/threexthree'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
+    best_acc = 0
 
     for i in range(100000):
         # Define the input function for training
@@ -295,7 +296,8 @@ def main():
         # Use the Estimator 'evaluate' method
         e = model.evaluate(input_fn)
 
-        print("Testing Accuracy:", e['accuracy'])
+        best_acc = max(best_acc, e['accuracy'])
+        print("Testing Accuracy: {:.4f} (Best: {:.4f})".format(e['accuracy'], best_acc))
 
 
 if __name__ == '__main__':
