@@ -224,12 +224,15 @@ def hyper3d_net(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None):
 
         x = tf.expand_dims(x, 0)
         x = tf.expand_dims(x, -1)
+        # x is (1, bands, h, w, 1)
 
         U1 = scat3d(x, psis[0], layer_params[0])
+        # U1 is (1, bands, h, w, lambda1)
 
 
         # swap channels with batch
         U1 = tf.transpose(U1, [4, 1, 2, 3, 0])
+        # U1 is (lambda1, bands, h, w, 1)
         
         U2s = []
         # only procede with increasing frequency paths
@@ -464,16 +467,16 @@ def single_input_example():
     pdb.set_trace()
 
 def run_all_accs():
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
-    data = mat_contents['indian_pines_corrected'].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_gt.mat'))
-    labels = mat_contents['indian_pines_gt']
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
+    # data = mat_contents['indian_pines_corrected'].astype(np.float32)
+    # data /= np.max(np.abs(data))
+    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_gt.mat'))
+    # labels = mat_contents['indian_pines_gt']
 
     # traintestfilenames = ['Indian_pines_gt_traintest_coarse_14px14p.mat', 'Indian_pines_gt_traintest_coarse_6px6p.mat', 'Indian_pines_gt_traintest_coarse_10px10p.mat', 'Indian_pines_gt_traintest_coarse_12x12_add7s9.mat', 'Indian_pines_gt_traintest_coarse_12x12_skip7s9.mat']
     # traintestfilenames = [ 'Indian_pines_gt_traintest_1_1abefb.mat', 'Indian_pines_gt_traintest_2_0bccd7.mat', 'Indian_pines_gt_traintest_3_7b4f69.mat', 'Indian_pines_gt_traintest_4_eeba08.mat', 'Indian_pines_gt_traintest_5_d75e59.mat', 'Indian_pines_gt_traintest_6_3a9ebd.mat', 'Indian_pines_gt_traintest_7_cad093.mat', 'Indian_pines_gt_traintest_8_97b27f.mat', 'Indian_pines_gt_traintest_9_1e4231.mat', 'Indian_pines_gt_traintest_10_6d71a1.mat' ];
     
-    takesome = []
+    # takesome = []
 
     # traintestfilenames = [ 'Indian_pines_gt_traintest_p04_nozero_1_05cf41.mat', 'Indian_pines_gt_traintest_p04_nozero_2_ce4ce0.mat', 'Indian_pines_gt_traintest_p04_nozero_3_c2fb75.mat', 'Indian_pines_gt_traintest_p04_nozero_4_5d3141.mat', 'Indian_pines_gt_traintest_p04_nozero_5_0d824a.mat', 'Indian_pines_gt_traintest_p04_nozero_6_6e4725.mat', 'Indian_pines_gt_traintest_p04_nozero_7_3e6a00.mat', 'Indian_pines_gt_traintest_p04_nozero_8_957ed5.mat', 'Indian_pines_gt_traintest_p04_nozero_9_9eb6a2.mat', 'Indian_pines_gt_traintest_p04_nozero_10_76cc88.mat' ];
     # takesome += traintestfilenames
@@ -490,19 +493,13 @@ def run_all_accs():
     # traintestfilenames = ['Indian_pines_gt_traintest_p05_1_f0b0f8.mat', 'Indian_pines_gt_traintest_p05_2_2c7710.mat', 'Indian_pines_gt_traintest_p05_3_dd1c2c.mat', 'Indian_pines_gt_traintest_p05_4_c44ed3.mat', 'Indian_pines_gt_traintest_p05_5_96acac.mat', 'Indian_pines_gt_traintest_p05_6_c99119.mat', 'Indian_pines_gt_traintest_p05_7_5c222a.mat', 'Indian_pines_gt_traintest_p05_8_a09f39.mat', 'Indian_pines_gt_traintest_p05_9_6e41d3.mat', 'Indian_pines_gt_traintest_p05_10_801219.mat' ]
     # takesome += traintestfilenames
 
-    traintestfilenames = [ 'Indian_pines_gt_traintest_ma2015_1_9146f0.mat', 'Indian_pines_gt_traintest_ma2015_2_692f24.mat', 'Indian_pines_gt_traintest_ma2015_3_223f7e.mat', 'Indian_pines_gt_traintest_ma2015_4_447c47.mat', 'Indian_pines_gt_traintest_ma2015_5_82c5ad.mat', 'Indian_pines_gt_traintest_ma2015_6_a46a51.mat', 'Indian_pines_gt_traintest_ma2015_7_be4864.mat', 'Indian_pines_gt_traintest_ma2015_8_dacd43.mat', 'Indian_pines_gt_traintest_ma2015_9_962bab.mat', 'Indian_pines_gt_traintest_ma2015_10_f03ef8.mat']
-    takesome += traintestfilenames
+    # traintestfilenames = [ 'Indian_pines_gt_traintest_ma2015_1_9146f0.mat', 'Indian_pines_gt_traintest_ma2015_2_692f24.mat', 'Indian_pines_gt_traintest_ma2015_3_223f7e.mat', 'Indian_pines_gt_traintest_ma2015_4_447c47.mat', 'Indian_pines_gt_traintest_ma2015_5_82c5ad.mat', 'Indian_pines_gt_traintest_ma2015_6_a46a51.mat', 'Indian_pines_gt_traintest_ma2015_7_be4864.mat', 'Indian_pines_gt_traintest_ma2015_8_dacd43.mat', 'Indian_pines_gt_traintest_ma2015_9_962bab.mat', 'Indian_pines_gt_traintest_ma2015_10_f03ef8.mat']
+    # takesome += traintestfilenames
 
     #hyper_run_acc(data, labels, IP_net(), takesome)
     
-    #custom_net(s1=9, s2=9, s3=9, e1=3, e2=3, e3=3, d1=3, d2=3, d3=3, reuse=tf.AUTO_REUSE)
-    #params = list(product(*[[7,9,11],[7,9,11],[3,5,7],[3,5,7]]))
-    # params = [(9,9,3,3),(9,11,3,3),(11,9,3,3),(11,11,3,3),(9,9,5,3),(9,11,5,3),(11,9,5,3),(11,11,5,3),(7,9,7,7),(9,11,7,7),(11,13,3,3),(13,11,3,3),(13,13,3,3),(11,13,5,3),(13,11,5,3),(13,13,5,3)]
-    # for param in params:
-    #     print('running: {}'.format(param))
-    #     hyper_run_acc(data, labels, custom_net(*param), takesome)
-    #     tf.reset_default_graph()
-    hyper_run_acc(data, labels, custom_net(*(11, 11, 5, 3) ), takesome)
+    #hyper_run_acc(data, labels, custom_net(*(11, 11, 5, 3) ), takesome)
+
      
     # tf.reset_default_graph()
 
@@ -543,22 +540,30 @@ def run_all_accs():
     # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
     # hyper_run_acc(data, labels, KSC_net(), traintestfilenames[:1])
 
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
-    # data = mat_contents['Botswana'].astype(np.float32)
-    # data = pxnn.normalize_channels(data)
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
-    # labels = mat_contents['Botswana_gt']
-    # traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
+    pdb.set_trace()
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
+    data = mat_contents['Botswana'].astype(np.float32)
+    data = pxnn.normalize_channels(data)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
+    labels = mat_contents['Botswana_gt']
+    traintestfilenames = [ 'Botswana_gt_traintest_1_e24fae.mat', 'Botswana_gt_traintest_2_518c23.mat', 'Botswana_gt_traintest_3_7b7b6a.mat', 'Botswana_gt_traintest_4_588b5a.mat', 'Botswana_gt_traintest_5_60813e.mat', 'Botswana_gt_traintest_6_05a6b3.mat', 'Botswana_gt_traintest_7_fbba81.mat', 'Botswana_gt_traintest_8_a083a4.mat', 'Botswana_gt_traintest_9_8591e0.mat', 'Botswana_gt_traintest_10_996e67.mat' ];
     # # traintestfilenames = ['Botswana_gt_traintest_coarse_36px36p.mat', 'Botswana_gt_traintest_coarse_12px12p.mat']
     # hyper_run_acc(data, labels, Bots_net(), traintestfilenames[:1])
 
+    params = list(product(*[[9,11,13],[9,11,13],[3,5,7],[5,7,9]]))
+    phalf = len(params)//2
+    for param in params[:phalf]:
+        print('running: {}'.format(param))
+        hyper_run_acc(data, labels, custom_net(*param), traintestfilenames[:3])
+        tf.reset_default_graph()
+    
     # tf.reset_default_graph()
 
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
-    # data = mat_contents['paviaU'].astype(np.float32)
-    # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
-    # labels = mat_contents['paviaU_gt']
+    #mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
+    #data = mat_contents['paviaU'].astype(np.float32)
+    #data /= np.max(np.abs(data))
+    #mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
+    #labels = mat_contents['paviaU_gt']
 
     # takesome = []
     # traintestfilenames = ['PaviaU_gt_traintest_s50_1_d5e6bd.mat', 'PaviaU_gt_traintest_s50_2_303acb.mat', 'PaviaU_gt_traintest_s50_3_d2eae6.mat', 'PaviaU_gt_traintest_s50_4_25f50b.mat', 'PaviaU_gt_traintest_s50_5_54b9ac.mat', 'PaviaU_gt_traintest_s50_6_66cf3b.mat', 'PaviaU_gt_traintest_s50_7_410a8a.mat', 'PaviaU_gt_traintest_s50_8_c9bc29.mat', 'PaviaU_gt_traintest_s50_9_55d476.mat', 'PaviaU_gt_traintest_s50_10_336ff4.mat' ]
@@ -567,7 +572,7 @@ def run_all_accs():
     # traintestfilenames = [ 'PaviaU_gt_traintest_s03_1_3f6384.mat', 'PaviaU_gt_traintest_s03_2_b67b5f.mat', 'PaviaU_gt_traintest_s03_3_7d8356.mat', 'PaviaU_gt_traintest_s03_4_241266.mat', 'PaviaU_gt_traintest_s03_5_ccbbb1.mat', 'PaviaU_gt_traintest_s03_6_dce186.mat', 'PaviaU_gt_traintest_s03_7_d5cdfe.mat', 'PaviaU_gt_traintest_s03_8_6bcd5a.mat', 'PaviaU_gt_traintest_s03_9_a1ff2b.mat', 'PaviaU_gt_traintest_s03_10_e1dac2.mat' ];
     # takesome += traintestfilenames[3:]
     # traintestfilenames = [ 'PaviaU_gt_traintest_1_334428.mat', 'PaviaU_gt_traintest_2_03ccd1.mat', 'PaviaU_gt_traintest_3_698d0c.mat', 'PaviaU_gt_traintest_4_7b2f96.mat', 'PaviaU_gt_traintest_5_8adc4a.mat', 'PaviaU_gt_traintest_6_b1ef2f.mat', 'PaviaU_gt_traintest_7_844918.mat', 'PaviaU_gt_traintest_8_16b8dc.mat', 'PaviaU_gt_traintest_9_e14191.mat', 'PaviaU_gt_traintest_10_c36f7c.mat' ];
-    # # # traintestfilenames = ['PaviaU_gt_traintest_coarse_16px16p.mat', 'PaviaU_gt_traintest_coarse_32px32p.mat', 'PaviaU_gt_traintest_coarse_64px64p.mat', 'PaviaU_gt_traintest_coarse_128px128p.mat']
+    #traintestfilenames = ['PaviaU_gt_traintest_coarse_16px16p.mat', 'PaviaU_gt_traintest_coarse_32px32p.mat', 'PaviaU_gt_traintest_coarse_64px64p.mat', 'PaviaU_gt_traintest_coarse_128px128p.mat']
 
     # traintestfilenames = [ 'PaviaU_gt_traintest_s60_1_dd069a.mat', 'PaviaU_gt_traintest_s60_2_ec12ca.mat', 'PaviaU_gt_traintest_s60_3_983688.mat', 'PaviaU_gt_traintest_s60_4_32e811.mat', 'PaviaU_gt_traintest_s60_5_a7a45a.mat', 'PaviaU_gt_traintest_s60_6_6aabaa.mat', 'PaviaU_gt_traintest_s60_7_125045.mat', 'PaviaU_gt_traintest_s60_8_0bcc09.mat', 'PaviaU_gt_traintest_s60_9_4680b3.mat', 'PaviaU_gt_traintest_s60_10_2da9e8.mat' ];
     # takesome += traintestfilenames[2:]
@@ -588,20 +593,20 @@ def run_all_accs():
     # traintestfilenames = [ 'PaviaU_gt_traintest_ma2015_1_0b3591.mat', 'PaviaU_gt_traintest_ma2015_2_88f4ce.mat', 'PaviaU_gt_traintest_ma2015_3_c51f99.mat', 'PaviaU_gt_traintest_ma2015_4_e3a361.mat', 'PaviaU_gt_traintest_ma2015_5_2922fa.mat', 'PaviaU_gt_traintest_ma2015_6_15194e.mat', 'PaviaU_gt_traintest_ma2015_7_df3db2.mat', 'PaviaU_gt_traintest_ma2015_8_ca5afe.mat', 'PaviaU_gt_traintest_ma2015_9_55492c.mat', 'PaviaU_gt_traintest_ma2015_10_a604d2.mat']
     # takesome += traintestfilenames[2:]
 
-    # hyper_run_acc(data, labels, Pavia_net(), traintestfilenames[:1])
+    #hyper_run_acc(data, labels, Pavia_net(), list(reversed(traintestfilenames)))
 
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
-    # data = mat_contents['Pavia_center_right'].astype(np.float32)
-    # data /= np.max(np.abs(data))
-    # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
-    # labels = mat_contents['Pavia_center_right_gt']
+    #mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right'))
+    #data = mat_contents['Pavia_center_right'].astype(np.float32)
+    #data /= np.max(np.abs(data))
+    #mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Pavia_center_right_gt.mat'))
+    #labels = mat_contents['Pavia_center_right_gt']
 
     # traintestfilenames = ['Pavia_center_right_gt_traintest_s30_1_ac0c37.mat', 'Pavia_center_right_gt_traintest_s30_2_ae70d7.mat', 'Pavia_center_right_gt_traintest_s30_3_b2b41f.mat', 'Pavia_center_right_gt_traintest_s30_4_29ea37.mat', 'Pavia_center_right_gt_traintest_s30_5_ed1aee.mat', 'Pavia_center_right_gt_traintest_s30_6_41a43a.mat', 'Pavia_center_right_gt_traintest_s30_7_17fd46.mat', 'Pavia_center_right_gt_traintest_s30_8_a81d10.mat', 'Pavia_center_right_gt_traintest_s30_9_f2e35e.mat', 'Pavia_center_right_gt_traintest_s30_10_1de379.mat']
     # # traintestfilenames = [ 'Pavia_center_right_gt_traintest_1_c23379.mat', 'Pavia_center_right_gt_traintest_2_555d38.mat', 'Pavia_center_right_gt_traintest_3_436123.mat', 'Pavia_center_right_gt_traintest_4_392727.mat', 'Pavia_center_right_gt_traintest_5_da2b6f.mat', 'Pavia_center_right_gt_traintest_6_9848f9.mat', 'Pavia_center_right_gt_traintest_7_2e4963.mat', 'Pavia_center_right_gt_traintest_8_12c92f.mat', 'Pavia_center_right_gt_traintest_9_7593be.mat', 'Pavia_center_right_gt_traintest_10_30cc68.mat' ];
-    # traintestfilenames = ['Pavia_center_right_gt_traintest_coarse_128px128p.mat','Pavia_center_right_gt_traintest_coarse_72px72p.mat','Pavia_center_right_gt_traintest_coarse_36px36p.mat']
+    #traintestfilenames = ['Pavia_center_right_gt_traintest_coarse_128px128p.mat','Pavia_center_right_gt_traintest_coarse_72px72p.mat','Pavia_center_right_gt_traintest_coarse_36px36p.mat']
 
     # traintestfilenames = [ 'Pavia_center_right_gt_traintest_p01_1_2ecf33.mat', 'Pavia_center_right_gt_traintest_p01_2_b162bf.mat', 'Pavia_center_right_gt_traintest_p01_3_b199a4.mat', 'Pavia_center_right_gt_traintest_p01_4_a182df.mat', 'Pavia_center_right_gt_traintest_p01_5_403e9e.mat', 'Pavia_center_right_gt_traintest_p01_6_b4cf2f.mat', 'Pavia_center_right_gt_traintest_p01_7_efa5c4.mat', 'Pavia_center_right_gt_traintest_p01_8_a6b7ec.mat', 'Pavia_center_right_gt_traintest_p01_9_725578.mat', 'Pavia_center_right_gt_traintest_p01_10_274170.mat' ];
-    # hyper_run_acc(data, labels, Pavia_net(), traintestfilenames[:1])
+    # hyper_run_acc(data, labels, Pavia_net(), traintestfilenames)
 
 
 
@@ -672,4 +677,3 @@ def run_all_full_imgs():
 if __name__ == '__main__':
     run_all_accs()
     # run_all_accs()
-
