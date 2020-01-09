@@ -36,8 +36,8 @@ DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
 learning_rate = 0.0001
 batch_size = 16
 num_steps = 300
-N_TEST = 2048
-N_TEST = 16
+N_TEST = int(1e12)
+#N_TEST = 16
 #N_TRAIN = 540
 #N_TRAIN = 16
 EVAL_PERIOD = 10
@@ -246,7 +246,8 @@ def yu2_net(x_dict, dropout, reuse, is_training, n_classes):
     return tf.squeeze(out)
 
 def hyper_3x3_yunet(x_dict, dropout, reuse, is_training, n_classes):
-    """
+    """Yu inspired network to follow ST preprocessing.
+    
     x should be (batch, channel, h, w)
     """
     # Define a scope for reusing the variables
