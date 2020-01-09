@@ -12,14 +12,14 @@ import operator
 import os
 import random
 
+import argparse
 import numpy as np
 from PIL import Image
 import scipy.io as sio
 import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR)
 from tqdm import tqdm
 
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 import windows as win
 from rle import myrlestring
@@ -27,7 +27,6 @@ import salt_baseline as sb
 import salt_data as sd
 import fst3d_feat as fst
 
-# import matplotlib.pyplot as plt
 import pdb
 
 DATA_PATH = '/scratch0/ilya/locDoc/data/hyperspec'
@@ -38,40 +37,33 @@ learning_rate = 0.0001
 batch_size = 16
 num_steps = 300
 N_TEST = 2048
-#N_TEST = 16
+N_TEST = 16
 #N_TRAIN = 540
 #N_TRAIN = 16
 EVAL_PERIOD = 10
 
 # Network Parameters
-n_classes=8 # 1-9 for PaviaU and PaviaCR
-# dropout = 0.25 # Dropout, probability to drop a unit
 dropout = 0.6
 
 layerO = namedtuple('layerO', ['strides', 'padding'])
 
-PaviaU_to_PaviaCR_lab = {
-    9: 9,
-    8: 4,
-    7: 7,
-    6: 5,
-    5: 0,
-    4: 2,
-    3: 0,
-    2: 3,
-    1: 6
+nclass_dict = {
+    'PaviaU': 9,
+    'PaviaCR': 9
 }
-PaviaCR_to_PaviaU_lab = {
-    9: 9,
-    8: 0,
-    7: 7,
-    6: 1,
-    5: 6,
-    4: 8,
-    3: 2,
-    2: 4,
-    1: 0
+# in train, label order
+dset_filenames_dict = {
+    'PaviaU': ('PaviaU.mat', 'PaviaU_gt.mat'),
+    'PaviaCR': ('Pavia_center_right.mat', 'Pavia_center_right_gt.mat')
 }
+# in train label order
+dset_fieldnames_dict = {
+    'PaviaU': ('paviaU', 'paviaU_gt'),
+    'PaviaCR': ('Pavia_center_right', 'Pavia_center_right_gt')
+}
+
+
+############ END OF CONSTANTS
 
 def scat3d_to_3d_3x3_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None):
     """Computes features for a specific pixel.
@@ -93,7 +85,6 @@ def scat3d_to_3d_3x3_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         x = tf.expand_dims(x, 0)
         x = tf.expand_dims(x, -1)
         # x is (1, bands, h, w, 1)
-
         U1 = fst.scat3d(x, psis[0], layer_params[0])
         # U1 is (1, bands, h, w, lambda1)
 
@@ -154,13 +145,11 @@ def scat3d_to_3d_3x3_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         
         SX = tf.expand_dims(SX, 0)
         SX = tf.layers.max_pooling3d(SX, (lambdax_d,1,1), (lambdax_d,1,1), padding='same')
-
         SX = tf.squeeze(SX)
         # SX is (channels, h, w)
 
     return SX
 
-# Create the neural network
 def hyper_3x3_net(x_dict, dropout, reuse, is_training, n_classes):
     """
     x should be (batch, channel, h, w)
@@ -268,20 +257,20 @@ def hyper_3x3_yunet(x_dict, dropout, reuse, is_training, n_classes):
 
         # 1x1 conv replaces PCA step
         # x should be (batch, channel, h, w)
-#         conv1 = tf.layers.conv2d(x, 4096, 1, activation=None)
-#         conv1 = tf.layers.average_pooling2d(conv1, 2, 1, padding='same')
-#         conv1 = tf.nn.relu(conv1)
+        # conv1 = tf.layers.conv2d(x, 4096, 1, activation=None)
+        # conv1 = tf.layers.average_pooling2d(conv1, 2, 1, padding='same')
+        # conv1 = tf.nn.relu(conv1)
 
         conv2 = tf.layers.conv2d(x, 128, 1, activation=None)
     
         conv2 = tf.layers.batch_normalization(conv2)
-        #conv2 = tf.layers.average_pooling2d(conv2, 2, 1, padding='same')
-        #conv2 = tf.nn.relu(conv2)
+        # conv2 = tf.layers.average_pooling2d(conv2, 2, 1, padding='same')
+        # conv2 = tf.nn.relu(conv2)
         conv2 = tf.layers.dropout(conv2, rate=dropout, training=is_training)
 
-#         conv3 = tf.layers.conv2d(conv2, 256, 1, activation=None)
-#         conv3 = tf.layers.average_pooling2d(conv3, 2, 1, padding='same')
-#         conv3 = tf.nn.relu(conv3)
+        # conv3 = tf.layers.conv2d(conv2, 256, 1, activation=None)
+        # conv3 = tf.layers.average_pooling2d(conv3, 2, 1, padding='same')
+        # conv3 = tf.nn.relu(conv3)
         
         conv4 = tf.layers.conv2d(conv2, 64, 1, activation=None)
         conv4 = tf.layers.average_pooling2d(conv4, 2, 1, padding='same')
@@ -292,100 +281,17 @@ def hyper_3x3_yunet(x_dict, dropout, reuse, is_training, n_classes):
 
     return tf.squeeze(out)
 
-# network=hyper_3x3_net
-network=hyper_3x3_yunet
-#network=deng_cnn
 
-# Define the model function (following TF Estimator Template)
-def model_fn(features, labels, mode):
-    
-
-    # Build the neural network
-    # Because Dropout have different behavior at training and prediction time, we
-    # need to create 2 distinct computation graphs that still share the same weights.
-    logits_train = network(features, dropout, reuse=False,
-                            is_training=True, n_classes=n_classes)
-    logits_test = network(features, dropout, reuse=True,
-                            is_training=False, n_classes=n_classes)
-
-    # Predictions
-    pred_classes = tf.argmax(logits_test, axis=1)
-    pred_probas = tf.nn.softmax(logits_test)
-
-    # If prediction mode, early return
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
-
-        # Define loss and optimizer
-    loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-        logits=logits_train, labels=tf.cast(labels, dtype=tf.int32)))
-    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.minimize(loss_op,
-                                  global_step=tf.train.get_global_step())
-
-    # Evaluate the accuracy of the model
-    acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-
-    # tf.summary.scalar('min', loss_op)
-
-    # TF Estimators requires to return a EstimatorSpec, that specify
-    # the different ops for training, evaluating, ...
-    estim_specs = tf.estimator.EstimatorSpec(
-        mode=mode,
-        predictions=pred_classes,
-        loss=loss_op,
-        train_op=train_op,
-        eval_metric_ops={'accuracy': acc_op})
-
-    return estim_specs
-
-
-# traintestfilename = 'PaviaU_gt_traintest_s60_1_dd069a.mat'
-# traintestfilename = 'PaviaU_gt_traintest_coarse_128px128p.mat'
-#traintestfilename = 'PaviaU_gt_traintest_coarse_32px32p.mat'
-
-# masks
-trainfilename = 'PaviaU_gt_traintest_coarse_32px32p.mat'
-testfilename = trainfilename
-# 2 masks are not currently supported, if datasets for train/test are different
-# then whole image is used
-
-trainimgname, trainimgfield = 'PaviaU.mat', 'paviaU'
-testimgname, testimgfield
-trainlabelname, trainlabelfield = 'PaviaU_gt.mat', 'paviaU_gt'
-testlabelname, testlabelfield = 'PaviaU_gt.mat', 'paviaU_gt'
-
-# masks for train/test sets
-mat_contents = None
-try:
-    mat_contents = sio.loadmat(os.path.join(DATA_PATH, trainfilename))
-except:
-    mat_contents = hdf5storage.loadmat(os.path.join(DATA_PATH, trainfilename))
-train_mask = mat_contents['train_mask'].astype(int).squeeze()
-try:
-    mat_contents = sio.loadmat(os.path.join(DATA_PATH, testfilename))
-except:
-    mat_contents = hdf5storage.loadmat(os.path.join(DATA_PATH, testfilename))
-test_mask = mat_contents['test_mask'].astype(int).squeeze()
-# labels
-mat_contents = sio.loadmat(os.path.join(DATASET_PATH, testlabelname))
-test_labels = mat_contents[testlabelfield]
-mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
-train_labels = mat_contents[trainlabelfield]
-# spectra
-mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainimgname))
-traindata = mat_contents[trainimgfield].astype(np.float32)
-traindata /= np.max(np.abs(traindata))
-mat_contents = sio.loadmat(os.path.join(DATASET_PATH, testimgname))
-testdata = mat_contents[testimgfield].astype(np.float32)
-testdata /= np.max(np.abs(testdata))
-data = traindata
-
-def get_train_test_data_raw(addl_padding=(4,4,0)):
+def get_train_val_data_raw(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask, addl_padding=(4,4,0)):
+        
     reuse = tf.AUTO_REUSE
 
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainimgname))
+    data = mat_contents[trainimgfield].astype(np.float32)
+    data /= np.max(np.abs(data))
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
+    labels = mat_contents[trainlabelfield]
     
-
     [height, width, nbands] = data.shape
 
     all_pixels = np.array(list(itertools.product(range(width),range(height))))
@@ -395,19 +301,9 @@ def get_train_test_data_raw(addl_padding=(4,4,0)):
     
     padded_data = np.pad(data, ((ap[0]//2,ap[0]//2),(ap[1]//2,ap[1]//2),(ap[2]//2,ap[2]//2)), 'wrap')
     
-    # modify the train labels to be like the test labels
-    CR2U = np.vectorize(lambda l: PaviaCR_to_PaviaU_lab[l])
-    U2CR = np.vectorize(lambda l: PaviaU_to_PaviaCR_lab[l])
-    if trainfilename != testfilename:
-        if 'PaviaU' in testfilename: 
-            train_labels = CR2U(test_labels)
-        elif 'Pavia_center' in testfilename:
-            train_labels = U2CR(test_labels)
-        train_pixels = np.array(list(itertools.product(range(traindata.shape[1]),range(traindata.shape[0]))))
-        test_pixels = np.array(list(itertools.product(range(testdata.shape[1]),range(testdata.shape[0]))))
-    else:
-        train_pixels = np.array(filter(lambda (x,y): train_labels[y,x]*train_mask[x*height+y] != 0, all_pixels))
-        test_pixels = np.array(filter(lambda (x,y): test_labels[y,x]*test_mask[x*height+y] != 0, all_pixels))
+
+    train_pixels = np.array(filter(lambda (x,y): labels[y,x]*train_mask[x*height+y] != 0, all_pixels))
+    val_pixels = np.array(filter(lambda (x,y): labels[y,x]*val_mask[x*height+y] != 0, all_pixels))
     
 
     train_pixels_list = train_pixels.tolist()
@@ -415,42 +311,45 @@ def get_train_test_data_raw(addl_padding=(4,4,0)):
     train_pixels = np.array(train_pixels_list)
     
 
-    test_pixels_list = test_pixels.tolist()
-    random.shuffle(test_pixels_list)
-    test_pixels = np.array(test_pixels_list)
+    val_pixels_list = val_pixels.tolist()
+    random.shuffle(val_pixels_list)
+    val_pixels = np.array(val_pixels_list)
 
-    print("Train / Test split is %i / %i" % (train_pixels.shape[0], test_pixels.shape[0]))
+    print("Train / Validation split is %i / %i" % (train_pixels.shape[0], val_pixels.shape[0]))
 
     batch_item_shape = tuple(map(operator.add, addl_padding, (1,1,data.shape[2])))
 
     trainX = np.zeros((train_mask.sum(),) + batch_item_shape, dtype=np.float32)
     trainY = np.zeros((train_mask.sum(),))
-    valX = np.zeros((test_mask.sum(),) + batch_item_shape, dtype=np.float32)
-    valY = np.zeros((test_mask.sum(),))
+    valX = np.zeros((val_mask.sum(),) + batch_item_shape, dtype=np.float32)
+    valY = np.zeros((val_mask.sum(),))
 
 
     for pixel_i, pixel in enumerate(tqdm(train_pixels[:,:], desc='Loading train data: ')):
         # this iterates through columns first
         [pixel_x, pixel_y] = pixel
         trainX[pixel_i,:,:,:] = padded_data[pixel_y:(pixel_y+ap[0]+1), pixel_x:(pixel_x+ap[1]+1), :]
-        trainY[pixel_i] = train_labels[pixel_y,pixel_x] - 1
+        trainY[pixel_i] = labels[pixel_y,pixel_x] - 1
 
-    for pixel_i, pixel in enumerate(tqdm(test_pixels[:N_TEST,:], desc='Loading test data: ')):
+    for pixel_i, pixel in enumerate(tqdm(val_pixels[:N_TEST,:], desc='Loading val data: ')):
         # this iterates through columns first
         [pixel_x, pixel_y] = pixel
         valX[pixel_i,:,:,:] = padded_data[pixel_y:(pixel_y+ap[0]+1), pixel_x:(pixel_x+ap[1]+1), :]
-        valY[pixel_i] = test_labels[pixel_y,pixel_x] - 1
+        valY[pixel_i] = labels[pixel_y,pixel_x] - 1
 
     return trainX, trainY, valX, valY
 
-def get_train_test_data():
+def get_train_val_data_preprocessed(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask):
+    """
+    Get train/val data with FST preprocessing.
+    """
     reuse = tf.AUTO_REUSE
 
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU.mat'))
-    data = mat_contents['paviaU'].astype(np.float32)
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainimgname))
+    data = mat_contents[trainimgfield].astype(np.float32)
     data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'PaviaU_gt.mat'))
-    labels = mat_contents['paviaU_gt']
+    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
+    labels = mat_contents[trainlabelfield]
 
     netO = fst.Pavia_net()
     # from pavia net
@@ -473,18 +372,18 @@ def get_train_test_data():
     padded_data = np.pad(data, ((ap[0]//2,ap[0]//2),(ap[1]//2,ap[1]//2),(ap[2]//2,ap[2]//2)), 'wrap')
     
     train_pixels = np.array(filter(lambda (x,y): labels[y,x]*train_mask[x*height+y] != 0, all_pixels))
-    test_pixels = np.array(filter(lambda (x,y): labels[y,x]*test_mask[x*height+y] != 0, all_pixels))
+    val_pixels = np.array(filter(lambda (x,y): labels[y,x]*val_mask[x*height+y] != 0, all_pixels))
     
     train_pixels_list = train_pixels.tolist()
     random.shuffle(train_pixels_list)
     train_pixels = np.array(train_pixels_list)
     
 
-    test_pixels_list = test_pixels.tolist()
-    random.shuffle(test_pixels_list)
-    test_pixels = np.array(test_pixels_list)
+    val_pixels_list = val_pixels.tolist()
+    random.shuffle(val_pixels_list)
+    val_pixels = np.array(val_pixels_list)
 
-    print("Train / Test split is %i / %i" % (train_pixels.shape[0], test_pixels.shape[0]))
+    print("Train / Validation split is %i / %i" % (train_pixels.shape[0], val_pixels.shape[0]))
 
     batch_item_shape = tuple(map(operator.add, netO.addl_padding, (3,3,data.shape[2])))
 
@@ -494,8 +393,8 @@ def get_train_test_data():
 
     trainX = np.zeros((train_mask.sum(),) + feat_shape, dtype=np.float32)
     trainY = np.zeros((train_mask.sum(),))
-    valX = np.zeros((test_mask.sum(),) + feat_shape, dtype=np.float32)
-    valY = np.zeros((test_mask.sum(),))
+    valX = np.zeros((val_mask.sum(),) + feat_shape, dtype=np.float32)
+    valY = np.zeros((val_mask.sum(),))
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -508,7 +407,7 @@ def get_train_test_data():
             trainX[pixel_i,:,:,:] = sess.run(feat, feed_dict)
             trainY[pixel_i] = labels[pixel_y,pixel_x] - 1
 
-        for pixel_i, pixel in enumerate(tqdm(test_pixels[:N_TEST,:], desc='Loading test data: ')):
+        for pixel_i, pixel in enumerate(tqdm(val_pixels[:N_TEST,:], desc='Loading val data: ')):
             # this iterates through columns first
             [pixel_x, pixel_y] = pixel
             subimg = padded_data[pixel_y:(pixel_y+ap[0]+1), pixel_x:(pixel_x+ap[1]+1), :]
@@ -518,12 +417,86 @@ def get_train_test_data():
 
     return trainX, trainY, valX, valY
 
-def main():
-#    trainX, trainY, valX, valY = get_train_test_data_raw((4,4,0))
-    trainX, trainY, valX, valY = get_train_test_data()
+
+def multiversion_matfile_get_field(fname, field, dtype=int):
+    mat_contents = None
+    try:
+        mat_contents = sio.loadmat(fname)
+    except:
+        mat_contents = hdf5storage.loadmat(fname)
+    return mat_contents[field].astype(dtype).squeeze()
+
+
+# hyper_3x3_net
+network_dict = {
+    'fst_yu': hyper_3x3_yunet,
+    'deng': deng_cnn,
+    'yu': yu_net
+}
+
+
+def train(args):
+    network = network_dict[args.network]
+    n_classes = nclass_dict[args.dataset]
+    trainimgname, trainlabelname = dset_filenames_dict[args.dataset]
+    trainimgfield, trainlabelfield = dset_fieldnames_dict[args.dataset]
+    # 2 masks are not currently supported, if datasets for train/val are different
+    train_mask = multiversion_matfile_get_field(args.mask_root, 'train_mask')
+    val_mask = multiversion_matfile_get_field(args.mask_root, 'test_mask')
+    
+    # Define the model function (following TF Estimator Template)
+    def model_fn(features, labels, mode):
+        
+    
+        # Build the neural network
+        # Because Dropout have different behavior at training and prediction time, we
+        # need to create 2 distinct computation graphs that still share the same weights.
+        logits_train = network(features, dropout, reuse=False,
+                                is_training=True, n_classes=n_classes)
+        logits_val = network(features, dropout, reuse=True,
+                                is_training=False, n_classes=n_classes)
+    
+        # Predictions
+        pred_classes = tf.argmax(logits_val, axis=1)
+        pred_probas = tf.nn.softmax(logits_val)
+    
+        # If prediction mode, early return
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
+    
+            # Define loss and optimizer
+        loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            logits=logits_train, labels=tf.cast(labels, dtype=tf.int32)))
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+        train_op = optimizer.minimize(loss_op,
+                                      global_step=tf.train.get_global_step())
+    
+        # Evaluate the accuracy of the model
+        acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
+    
+        # tf.summary.scalar('min', loss_op)
+    
+        # TF Estimators requires to return a EstimatorSpec, that specify
+        # the different ops for training, evaluating, ...
+        estim_specs = tf.estimator.EstimatorSpec(
+            mode=mode,
+            predictions=pred_classes,
+            loss=loss_op,
+            train_op=train_op,
+            eval_metric_ops={'accuracy': acc_op})
+    
+        return estim_specs
+    
+    ###############################
+    
+    if args.fst_preprocessing:
+        trainX, trainY, valX, valY = get_train_val_data_preprocessed(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask)
+    else:
+        trainX, trainY, valX, valY = get_train_val_data_raw(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask, (4,4,0))
+            
     
     # model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/threexthree'
-    model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/test'
+    model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/throw'
     model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
     best_acc = 0
 
@@ -533,7 +506,6 @@ def main():
             x={'subimages': trainX[:,:,:,:]}, y=trainY[:],
             batch_size=batch_size, num_epochs=EVAL_PERIOD, shuffle=True)
         # Train the Model
-        tf.logging.set_verbosity(tf.logging.ERROR)
         model.train(input_fn, steps=None) # 
 
         # if i % EVAL_PERIOD == 0:
@@ -546,7 +518,23 @@ def main():
         e = model.evaluate(input_fn)
 
         best_acc = max(best_acc, e['accuracy'])
-        print("{:06d}: Testing Accuracy: {:.4f} (Best: {:.4f})".format(i, e['accuracy'], best_acc))
+        print("{:06d}: Validation Accuracy: {:.4f} (Best: {:.4f})".format(i, e['accuracy'], best_acc))
+
+def main():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--network', required=True,
+                      help='Name of network to run')
+    parser.add_argument('--dataset', required=True,
+                      help='Name of dataset to run on')
+    parser.add_argument('--mask_root', required=True,
+                      help='Full path to mask to use to generate train/val set.')
+    parser.add_argument(
+        '--fst_preprocessing', action='store_true', default=False,
+        help='Load data with fourier scattering preprocessing (default: %(default)s)')
+    args = parser.parse_args()
+
+    train(args)
 
 if __name__ == '__main__':
     main()
