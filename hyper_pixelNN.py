@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 import scipy.io as sio
 import tensorflow as tf
-tf.logging.set_verbosity(tf.logging.ERROR)
+#tf.logging.set_verbosity(tf.logging.ERROR)
 from tqdm import tqdm
 
 
@@ -198,6 +198,11 @@ def deng_cnn(x_dict, dropout, reuse, is_training, n_classes):
 
 def yu_net(x_dict, dropout, reuse, is_training, n_classes):
     """
+    Based on:
+    
+    Convolutional neural networks for hyperspectral image classification
+    Yu, Jia, Xu
+
     x should be (batch, channel, h, w)
     """
     # Define a scope for reusing the variables
@@ -206,17 +211,18 @@ def yu_net(x_dict, dropout, reuse, is_training, n_classes):
         x = x_dict['subimages']
         # x should be (batch, h, w, channel)
 
-        # 1x1 conv replaces PCA step
         conv1 = tf.layers.conv2d(x, 128, 1, activation=None)
-        conv1 = tf.layers.average_pooling2d(conv1, 2, 1, padding='same')
+        conv1 = tf.layers.batch_normalization(conv1)
+        conv1 = tf.nn.relu(conv1)
         conv1 = tf.layers.dropout(conv1, rate=dropout, training=is_training)
-        # conv1 = tf.nn.relu(conv1)
 
         conv2 = tf.layers.conv2d(conv1, 64, 1, activation=None)
-        conv2 = tf.layers.average_pooling2d(conv2, 2, 1, padding='same')
+        conv2 = tf.layers.batch_normalization(conv2)
+        conv2 = tf.nn.relu(conv2)
         conv2 = tf.layers.dropout(conv2, rate=dropout, training=is_training)
 
         conv3 = tf.layers.conv2d(conv2, n_classes, 1, activation=None)
+        conv3 = tf.nn.relu(conv3)
         out = tf.layers.average_pooling2d(conv3, 5, 1)
 
     return tf.squeeze(out)
@@ -444,6 +450,18 @@ def train(args):
     # 2 masks are not currently supported, if datasets for train/val are different
     train_mask = multiversion_matfile_get_field(args.mask_root, 'train_mask')
     val_mask = multiversion_matfile_get_field(args.mask_root, 'test_mask')
+        
+    if args.fst_preprocessing:
+        trainX, trainY, valX, valY = get_train_val_data_preprocessed(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask)
+    else:
+        trainX, trainY, valX, valY = get_train_val_data_raw(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask, (4,4,0))
+            
+    best_acc = 0
+    train_set_size = trainX.shape[0]
+    steps_per_epoch = train_set_size // args.batch_size
+    max_steps = args.num_epochs * steps_per_epoch
+    
+    ############### END OF SETUP
     
     # Define the model function (following TF Estimator Template)
     def model_fn(features, labels, mode):
@@ -489,37 +507,24 @@ def train(args):
         return estim_specs
     
     ###############################
-    
-    if args.fst_preprocessing:
-        trainX, trainY, valX, valY = get_train_val_data_preprocessed(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask)
-    else:
-        trainX, trainY, valX, valY = get_train_val_data_raw(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask, (4,4,0))
-            
-    
-    # model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/threexthree'
-    model_dir = '/scratch0/ilya/locDoc/data/hypernet/models/throw'
-    model = tf.estimator.Estimator(model_fn, model_dir=model_dir)
-    best_acc = 0
 
-    for i in range(100000):
-        # Define the input function for training
-        input_fn = tf.estimator.inputs.numpy_input_fn(
-            x={'subimages': trainX[:,:,:,:]}, y=trainY[:],
-            batch_size=batch_size, num_epochs=EVAL_PERIOD, shuffle=True)
-        # Train the Model
-        model.train(input_fn, steps=None) # 
+    model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
+    
+    train_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={'subimages': trainX[:,:,:,:]}, y=trainY[:],
+        batch_size=args.batch_size, num_epochs=args.eval_period, shuffle=True)
+    
+    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={'subimages': valX[:N_TEST,:,:,:]}, y=valY[:N_TEST],
+        batch_size=batch_size, shuffle=False)
+    
+    for i in range(args.num_epochs // args.eval_period):
+        model.train(train_input_fn)
 
-        # if i % EVAL_PERIOD == 0:
-        # Evaluate the Model
-        # Define the input function for evaluating
-        input_fn = tf.estimator.inputs.numpy_input_fn(
-            x={'subimages': valX[:N_TEST,:,:,:]}, y=valY[:N_TEST],
-            batch_size=batch_size, shuffle=False)
-        # Use the Estimator 'evaluate' method
-        e = model.evaluate(input_fn)
+        e = model.evaluate(eval_input_fn)
 
         best_acc = max(best_acc, e['accuracy'])
-        print("{:06d}: Validation Accuracy: {:.4f} (Best: {:.4f})".format(i, e['accuracy'], best_acc))
+        print("{:06d}: Validation Accuracy: {:.4f} (Best: {:.4f})".format(i*args.eval_period, e['accuracy'], best_acc))
 
 def main():
     parser = argparse.ArgumentParser(
@@ -530,9 +535,21 @@ def main():
                       help='Name of dataset to run on')
     parser.add_argument('--mask_root', required=True,
                       help='Full path to mask to use to generate train/val set.')
+    parser.add_argument('--model_root', required=True,
+                      help='Full path of where to output the results of training.')
+    # Optionals
     parser.add_argument(
         '--fst_preprocessing', action='store_true', default=False,
-        help='Load data with fourier scattering preprocessing (default: %(default)s)')
+        help='If true load data with fourier scattering preprocessing (default: %(default)s)')
+    parser.add_argument(
+        '--batch_size', type=int, default=16,
+        help='Batch Size')
+    parser.add_argument(
+        '--num_epochs', type=int, default=10000,
+        help='Number of epochs to run training for.')
+    parser.add_argument(
+        '--eval_period', type=int, default=50,
+        help='Eval after every N epochs.')
     args = parser.parse_args()
 
     train(args)

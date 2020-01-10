@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=0 \
 python hyper_pixelNN.py \
 --network yu \
 --dataset PaviaU \
---mask_root /scratch0/ilya/locDoc/data/hyperspec/PaviaU_gt_traintest_s03_1_3f6384.mat
+--mask_root /scratch0/ilya/locDoc/data/hyperspec/PaviaU_gt_traintest_s200_1_591636.mat \
+--model_root /scratch0/ilya/locDoc/data/hypernet/models/throw
 
 
 
