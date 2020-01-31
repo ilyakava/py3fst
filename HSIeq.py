@@ -15,9 +15,9 @@ ds = 2 # downsample factor
 
 # dataset_name, data_struct_field_name = ['Indian_pines_corrected.mat', 'indian_pines_corrected']
 
-# dataset_name, data_struct_field_name = ['Salinas_corrected.mat', 'salinas_corrected']
+dataset_name, data_struct_field_name = ['Salinas_corrected.mat', 'salinas_corrected']
 
-dataset_name, data_struct_field_name = ['KSC_corrected.mat', 'KSC']
+# dataset_name, data_struct_field_name = ['KSC_corrected.mat', 'KSC']
 
 # dataset_name, data_struct_field_name = ['Botswana.mat', 'Botswana']
 
@@ -62,20 +62,22 @@ a0 = 1
 v0 = 200
 m0 = 1000
 
+# initial values from:
+# https://en.wikipedia.org/wiki/Color#/media/File:Cones_SMJ2_E.svg
 state = {
     'red': {
-        'm1': 600,
-        'v1': 75,
+        'm1': 580,
+        'v1': 60,
         'a1': 1,
     },
     'blue': {
-        'm1': 450,
-        'v1': 50,
+        'm1': 440,
+        'v1': 25,
         'a1': 1,
     },
     'green': {
-        'm1': 550,
-        'v1': 100,
+        'm1': 540,
+        'v1': 45,
         'a1': 1,
     },
     'color': 'red'
@@ -184,7 +186,7 @@ def save(event):
     color[:,:,2] *= state['green']['a1']
 
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
-    plt.imsave('/cfarhomes/ilyak/Pictures/%s_color_%s.png' % (data_struct_field_name, timestamp), color)
+    plt.imsave('/scratch0/ilya/locDownloads/%s_color_%s.png' % (data_struct_field_name, timestamp), color)
     print('saved')
 savebutton.on_clicked(save)
 
