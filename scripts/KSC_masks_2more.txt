@@ -1,0 +1,8 @@
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s03_3_580304.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s03_4_564216.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s05_3_320000.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s05_4_159824.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s10_3_563696.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s10_4_368756.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s20_3_249552.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s20_4_257112.mat

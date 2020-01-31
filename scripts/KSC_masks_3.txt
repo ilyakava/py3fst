@@ -1,0 +1,12 @@
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s03_0_880024.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s03_1_046456.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s03_2_234652.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s05_0_741844.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s05_1_785760.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s05_2_971760.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s10_0_048532.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s10_1_510524.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s10_2_362068.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s20_0_053156.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s20_1_095208.mat
+/scratch0/ilya/locDoc/data/hyperspec/KSC_strictsinglesite_trainval_s20_2_707612.mat
