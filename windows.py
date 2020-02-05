@@ -122,6 +122,25 @@ def fst3d_phi_window_3D(kernel_size):
 
     return winO(1, np.expand_dims(kernel,-1), [[0,0,0]], kernel_size)
 
+def gabor_psi_factory(kernel_size):
+    """
+    """
+    filter_params = np.array(list(itertools.product(
+        np.linspace(0, 1, kernel_size[0], endpoint=False),
+        np.linspace(0, 1, kernel_size[1], endpoint=False),
+        np.linspace(0, 1, kernel_size[2], endpoint=False)
+    )))
+   
+    nfilt = filter_params.shape[0]
+    
+    filters = np.zeros(kernel_size + [nfilt], dtype=np.complex64)
+
+    for idx, filter_param in enumerate(filter_params):
+        [mdM1, mdM2, mdM3] = filter_param
+        filters[:,:,:,idx] = fst3d_psi_window_3D(mdM1, mdM2, mdM3, kernel_size)
+
+    return winO(nfilt, filters, filter_params, kernel_size)
+
 def fst3d_psi_factory(kernel_size, min_freq=[0,0,0]):
     """
     Args:

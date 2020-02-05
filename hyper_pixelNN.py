@@ -168,6 +168,44 @@ def scat3d_to_3d_nxn_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         # SX is (channels, h, w)
 
     return tf.transpose(SX, [1, 2, 0])
+    
+def gabor_mag_filter(x, reuse=tf.AUTO_REUSE, psis=None, layer_params=None, final_size=5):
+    """Computes gabor magnitude features for a specific pixel.
+
+    Args:
+        x: image in (height, width, bands) format
+        psis: array of length 1 winO struct, filters are in (bands, height, width) format!
+        final_size: int, the outputs spatial size (will be a spatial square)
+    Output:
+        center pixel feature vector in the s
+    """
+    assert len(layer_params) == 1, 'this network is 1 layer only'
+    assert len(psis) == 1, 'this network is 1 layer only'
+    
+    with tf.variable_scope('Hyper3DNet', reuse=reuse):
+        x = tf.transpose(x, [2, 0, 1])
+
+        x = tf.expand_dims(x, 0)
+        x = tf.expand_dims(x, -1)
+        # x is (1, bands, h, w, 1)
+        U1 = fst.scat3d(x, psis[0], layer_params[0])
+        # U1 is (1, bands, h, w, lambda1)
+
+        U1 = tf.transpose(U1, [0, 4, 1, 2, 3])
+        # U1 is (1, lambda1, bands, h, w)
+        
+        ds_amounts = {
+            9: 7,
+            7: 5,
+            5: 3,
+            3: 1
+        }
+        lambda1_d = ds_amounts[psis[0].kernel_size[1]]; band1_d = 3
+        
+        U1 = tf.layers.max_pooling3d(U1, (lambda1_d,band1_d,1), (lambda1_d,band1_d,1), padding='same')
+        U1 = tf.reshape(U1, [-1, final_size, final_size])
+
+    return tf.transpose(U1, [1, 2, 0])
 
 def hyper_3x3_net(x_dict, dropout, reuse, is_training, n_classes):
     """
@@ -420,16 +458,26 @@ def preprocess_data(data, st_net_spec, patch_size=51):
     reuse = tf.AUTO_REUSE
     
     # Network info
-    
-    psi1 = win.fst3d_psi_factory(st_net_spec.psi1)
-    psi2 = win.fst3d_psi_factory(st_net_spec.psi2)
-    phi = win.fst3d_phi_window_3D(st_net_spec.phi)
-    net_addl_padding = net_addl_padding_from_spec(st_net_spec)
-
     layer_params = layerO((1,1,1), 'valid')
-    psis=[psi1,psi2]
-    layer_params=[layer_params, layer_params, layer_params]
-    
+    preprocessing_mode = 'ST'
+    if st_net_spec.psi1 and st_net_spec.psi2 and st_net_spec.phi:
+        print('Will perform Scattering...')
+        psi1 = win.fst3d_psi_factory(st_net_spec.psi1)
+        psi2 = win.fst3d_psi_factory(st_net_spec.psi2)
+        psis=[psi1,psi2]
+        phi = win.fst3d_phi_window_3D(st_net_spec.phi)
+        net_addl_padding = net_addl_padding_from_spec(st_net_spec)
+        layer_params=[layer_params, layer_params, layer_params]
+    elif st_net_spec.psi1 and st_net_spec.psi2 is None and st_net_spec.phi is None: # just one layer gabor
+        print('Will perform Gabor filtering...')
+        psis = [win.gabor_psi_factory(st_net_spec.psi1)]
+        b, h, w = list(tupsum(tuple(st_net_spec.psi1), (-1,-1,-1)))
+        net_addl_padding = (h,w,b)
+        layer_params=[layer_params]
+        preprocessing_mode = 'Gabor'
+    else:
+        raise ValueError('This ST spec is not supported')
+
     # END Network info
     
 
@@ -454,7 +502,10 @@ def preprocess_data(data, st_net_spec, patch_size=51):
     x = tf.placeholder(tf.float32, shape=batch_item_shape)
     print('Compiling Graph...')
     compile_start = time.time()
-    feat = scat3d_to_3d_nxn_2layer(x, reuse, psis, phi, layer_params, final_size=patch_size)
+    if preprocessing_mode == 'ST':
+        feat = scat3d_to_3d_nxn_2layer(x, reuse, psis, phi, layer_params, final_size=patch_size)
+    elif preprocessing_mode == 'Gabor':
+        feat = gabor_mag_filter(x, reuse, psis, layer_params, final_size=patch_size)
     compile_time = time.time() - compile_start
     feat_shape = tuple([int(d) for d in feat.shape])
     print('Graph Compiled %is. Feature dimension per pixel is now %i.' % (int(compile_time), feat_shape[2]))
@@ -466,7 +517,7 @@ def preprocess_data(data, st_net_spec, patch_size=51):
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
-        for pixel_i, pixel in enumerate(tqdm(patch_ul_corners, desc='Performing ST: ', total=len(patch_xs)*len(patch_ys))):
+        for pixel_i, pixel in enumerate(tqdm(patch_ul_corners, desc=('Performing %s: ' % preprocessing_mode), total=len(patch_xs)*len(patch_ys))):
             [pixel_x, pixel_y] = pixel
             subimg = padded_data[pixel_y:(patch_size+pixel_y+ap[0]), pixel_x:(patch_size+pixel_x+ap[1]), :]
             feed_dict = {x: subimg}
@@ -520,6 +571,7 @@ sts_dict = {
     'KSC': st_net_spec_struct([5,9,9],[5,7,7],[5,7,7]),
     'PU_SSS': st_net_spec_struct([9,7,7],[9,3,3],[9,3,3]),
     'IP_SSS': st_net_spec_struct([5,9,9],[5,5,5],[5,5,5]),
+    'IP_gabor': st_net_spec_struct([5,9,9],None,None),
 }
 
 def many_svm_evals(args):
