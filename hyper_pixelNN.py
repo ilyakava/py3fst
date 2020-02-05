@@ -349,111 +349,6 @@ def cube_iter(data, batch_size, addl_padding=(4,4,0)):
     if leftover != 0:
         yield batchX[:leftover]
 
-def get_train_val_data_preprocessed_pixelwise(trainimgname, trainimgfield, trainlabelname, trainlabelfield, train_mask, val_mask, n_eval=int(1e12)):
-    """
-    Get train/val data with FST preprocessing.
-    
-    Pads data, then extract each pixel and pass through fst.
-    """
-    reuse = tf.AUTO_REUSE
-
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainimgname))
-    data = mat_contents[trainimgfield].astype(np.float32)
-    data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
-    labels = mat_contents[trainlabelfield]
-
-    # psi = win.fst3d_psi_factory([5,5,5])
-    # phi = win.fst3d_phi_window_3D([5,5,5])
-    # net_addl_padding = (12,12,12)
-    
-    # psi = win.fst3d_psi_factory([3,3,3])
-    # phi = win.fst3d_phi_window_3D([3,3,3])
-    # net_addl_padding = (6,6,6)
-    
-    psi = win.fst3d_psi_factory([9,9,9])
-    phi = win.fst3d_phi_window_3D([9,9,9])
-    net_addl_padding = (24,24,24)
-    
-    # from pavia net
-    # psi = win.fst3d_psi_factory([7,7,7])
-    # phi = win.fst3d_phi_window_3D([7,7,7])
-    # net_addl_padding = (18,18,18)
-    # this is the padding that is needed for the above operations
-    
-    
-    layer_params = layerO((1,1,1), 'valid')
-    psis=[psi,psi]
-    layer_params=[layer_params, layer_params, layer_params]
-    
-
-    [height, width, nbands] = data.shape
-    hyper_pixel_shape = (1, 1,data.shape[2])
-    st_output_spatial_size = 3
-    # to make the st output larger than 1 pixel, we pad it
-    addl_spatial_pad = (st_output_spatial_size-1, st_output_spatial_size-1, 0)
-    data_addl_padding = tupsum(net_addl_padding, addl_spatial_pad)
-
-    all_pixels = np.array(list(itertools.product(range(width),range(height))))
-
-    ap = np.array(data_addl_padding)
-    assert np.all(ap % 2 == 0), 'Assymetric is not supported'
-    
-    padded_data = np.pad(data, ((ap[0]//2,ap[0]//2),(ap[1]//2,ap[1]//2),(ap[2]//2,ap[2]//2)), PAD_TYPE)
-    
-    train_pixels = np.array(filter(lambda (x,y): labels[y,x]*train_mask[x*height+y] != 0, all_pixels))
-    val_pixels = np.array(filter(lambda (x,y): labels[y,x]*val_mask[x*height+y] != 0, all_pixels))
-    
-    train_pixels_list = train_pixels.tolist()
-    random.shuffle(train_pixels_list)
-    train_pixels = np.array(train_pixels_list)
-    
-
-    val_pixels_list = val_pixels.tolist()
-    random.shuffle(val_pixels_list)
-    val_pixels = np.array(val_pixels_list)
-
-    print("Train / Validation split is %i / %i" % (train_pixels.shape[0], val_pixels.shape[0]))
-
-    batch_item_shape = tupsum(hyper_pixel_shape, data_addl_padding)
-    print("Batch item shape is {}".format(batch_item_shape))
-    
-    x = tf.placeholder(tf.float32, shape=batch_item_shape)
-    feat = scat3d_to_3d_nxn_2layer(x, reuse, psis, phi, layer_params, final_size=st_output_spatial_size)
-    feat_shape = tuple([int(d) for d in feat.shape])
-    print('Feature dimension per pixel is now %i.' % feat_shape[2])
-    assert feat_shape[0] == feat_shape[1], 'ST spatial output is not square!'
-    assert feat_shape[0] == st_output_spatial_size, 'ST spatial output size is %i, expected %i!' % (feat_shape[2], st_output_spatial_size)
-
-    trainX = np.zeros((train_mask.sum(),) + feat_shape, dtype=np.float32)
-    trainY = np.zeros((train_mask.sum(),))
-    n_eval = min(n_eval, val_mask.sum())
-    valX = np.zeros((n_eval,) + feat_shape, dtype=np.float32)
-    valY = np.zeros((n_eval,))
-
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-
-        for pixel_i, pixel in enumerate(tqdm(train_pixels[:,:], desc='Loading train data: ')):
-            # this iterates through columns first
-            [pixel_x, pixel_y] = pixel
-            subimg = padded_data[pixel_y:(pixel_y+ap[0]+1), pixel_x:(pixel_x+ap[1]+1), :]
-            feed_dict = {x: subimg}
-            trainX[pixel_i,:,:,:] = sess.run(feat, feed_dict)
-            trainY[pixel_i] = labels[pixel_y,pixel_x] - 1
-
-        for pixel_i, pixel in enumerate(tqdm(val_pixels[:n_eval,:], desc='Loading val data: ', total=n_eval)):
-            # this iterates through columns first
-            [pixel_x, pixel_y] = pixel
-            subimg = padded_data[pixel_y:(pixel_y+ap[0]+1), pixel_x:(pixel_x+ap[1]+1), :]
-            feed_dict = {x: subimg}
-            valX[pixel_i,:,:,:] = sess.run(feat, feed_dict)
-            valY[pixel_i] = labels[pixel_y,pixel_x] - 1
-    
-    
-    return trainX, trainY, valX, valY
-
-
 st_net_spec_struct = namedtuple('st_net_spec_struct', ['psi1', 'psi2', 'phi'])
 paviaU_spec = st_net_spec_struct([9,9,9],[9,9,9],[9,9,9])
 spec_7 = st_net_spec_struct([7,7,7],[7,7,7],[7,7,7])
@@ -627,7 +522,7 @@ sts_dict = {
     'IP_SSS': st_net_spec_struct([5,9,9],[5,5,5],[5,5,5]),
 }
 
-def many_svm_evals_BACKUP(args):
+def many_svm_evals(args):
     """
     
     Like svm_predict but without the full image prediction, and for many masks.
@@ -682,98 +577,6 @@ def many_svm_evals_BACKUP(args):
     npz_path = os.path.join(args.model_root, 'SVM_results_%i.npz' % (random.randint(0,1e10)))
     np.savez(npz_path, results=results)
     print('Saved %s' % npz_path)
-
-def many_svm_evals(args):
-    """
-    
-    Messsing up this method now to get some results for DLGRF
-    """
-    bs = args.batch_size
-    n_classes = nclass_dict[args.dataset]
-    trainimgname, trainlabelname = dset_filenames_dict[args.dataset]
-    trainimgfield, trainlabelfield = dset_fieldnames_dict[args.dataset]
-    st_net_spec = sts_dict[args.st_type]
-    
-    mask_list_f = open(args.svm_multi_mask_file_list, "r")
-    masks = [line.strip() for line in mask_list_f.readlines() if line != "\n"]
-    mask_list_f.close()
-    valid_masks = [m for m in masks if m and os.path.exists(m)]
-    print("%i/%i masks valid in provided file." % (len(valid_masks), len(masks)))
-    
-    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
-        
-    if args.fst_preprocessing:
-        data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
-    
-    assert args.dlgrf_preprocessing, 'Dude this method is messed up for testing dlgrf'
-    
-    my_sigmas = []
-    # for i in reversed(range(2,6)):
-    #     for j in range(2,6):
-    #         my_sigmas.append([i,j,j])
-    my_sigma = [7,7,7]
-    my_sigmas.append(my_sigma)
-    results = {}
-    
-    for npca in range(5,105,5):
-        for gs in reversed(range(-8,4)):
-            for ks in reversed(range(-3,16)):
-                # print('START TESTING THE SIGMA {}'.format(my_sigma))
-                # print('START TESTING THE C {} Gamma {}'.format(ks, gs))
-                
-                # ks=21
-                # data_new = dlgrf_filter(data, kernel_size=[ks,ks,ks], sigmas=my_sigma, patch_size=51)
-                data_new = pca_embedding(data, n_components=npca)
-                # data_new = data
-                
-                height, width, bands = dset_dims[trainimgname]
-                
-                # results = {}
-                
-                for mask_path in valid_masks:
-                    # 2 mask roots are not currently supported, if datasets for train/val are different
-                    train_mask = multiversion_matfile_get_field(mask_path, 'train_mask')
-                    val_mask = multiversion_matfile_get_field(mask_path, 'test_mask')
-                       
-                    s = args.network_spatial_size - 1
-                    trainX, trainY, valX, valY = get_train_val_splits(data_new, labels, train_mask, val_mask, (s,s,0))
-                    
-                    print('starting training')
-                    start = time.time()
-                    # clf = SVC(kernel='linear',decision_function_shape='ovo') # 52
-                    # clf = LinearSVC(C=2**ks) # 57 with C=1, 68 with C=10, , multi_class='crammer_singer' and tol make no difference, best is 128
-                    clf = SVC(C=2**ks, gamma=2**gs) # 74
-                    # clf = SVC(kernel='linear', C=1000)
-                    # clf = SVC(kernel='linear') # 52
-                    clf.fit(trainX.squeeze(), trainY)
-                    end = time.time()
-                    print('Training done. Took %is' % int(end - start))
-                    
-                    # from lib.libsvm.python.svmutil import *
-                    # prob = svm_problem(trainY.tolist(), trainX.squeeze().tolist())
-                    # param = svm_parameter()
-                    # param.kernel_type = LINEAR
-                    # param.C = 10
-                    # m=svm_train(prob, param)
-                    # svm_predict(valY.tolist(), valX.squeeze().tolist(), m) # 62
-                    
-                    n_correct = 0
-                    for i in tqdm(range(0,valY.shape[0],bs), desc='Getting Val Accuracy'):
-                        p_label = clf.predict(valX.squeeze()[i:i+bs]);
-                        n_correct += (p_label == valY[i:i+bs]).sum()
-                    acc = float(n_correct) / valY.shape[0]
-                    
-                    print('Done with %s' % mask_path )
-                    print('SVM has validation accuracy %.2f' % (acc*100) )
-                    id_ = '%i_%i_%i' % (npca, gs, ks)
-                    results[id_] = acc
-                
-            npz_path = os.path.join(args.model_root, 'SVM_results_%i.npz' % (random.randint(0,1e10)))
-            np.savez(npz_path, results=results)
-            print('Saved %s' % npz_path)
-            print('DONE TESTING THE SIGMA {}'.format(my_sigma))
-    
-    
 
 def svm_predict(args):
     """Train and Predict using an SVM features on features.
