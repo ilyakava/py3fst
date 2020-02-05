@@ -12,6 +12,12 @@ import hyper_pixelNN as hsinn
 
 import pdb
 
+FEAT_DIR = '/scratch0/ilya/locDoc/data/hyperspec/features/npz_feat'
+FEAT_DIR = '/scratch2/ilyak/locDoc/data/hyperspec/features/npz_feat'
+
+RESULTS_DIR = '/scratch0/ilya/locDoc/pyfst'
+RESULTS_DIR = '/scratch2/ilyak/locDoc/pyfst'
+
 def run_svm(trainX, trainY, testX, testY):
     print('starting training')
     start = time.time()
@@ -95,7 +101,7 @@ def specs_append9_bands():
                     specs.append( [ [b,s1,s1], [b,s2,s2], [b,s2,s2] ] )
     return specs
     
-def perform_gridsearch(dataset, masks, specs, outfile='gridsearch.npz', save_features=False, preprocessed_data_root='/scratch0/ilya/locDoc/data/hyperspec/features/npz_feat'):
+def perform_gridsearch(dataset, masks, specs, outfile='gridsearch.npz', save_features=False, preprocessed_data_root=FEAT_DIR):
     # a list< list < int > > -> list< float >.
     # Maps a configuration to a set of accuracies
     results = {}
@@ -110,8 +116,8 @@ def perform_gridsearch(dataset, masks, specs, outfile='gridsearch.npz', save_fea
         results[hsinn.spec_to_str(st_net_spec)] = accs
         print('FINISHED %i/%i' % (spec_i+1, len(specs)))
     
-        np.savez(os.path.join('/scratch0/ilya/locDoc/pyfst', outfile), results=results)
-    print('Saved %s' % os.path.join('/scratch0/ilya/locDoc/pyfst', outfile))
+        np.savez(os.path.join(RESULTS_DIR, outfile), results=results)
+    print('Saved %s' % os.path.join(RESULTS_DIR, outfile))
     
 
 def paviaU():
@@ -128,69 +134,88 @@ def paviaU():
     #         'PaviaU_gt_traintest_s03_10_e1dac2.mat']
     
              
-    masks = ['PaviaU_gt_traintest_s200_10_149f64.mat',
-        'PaviaU_gt_traintest_s200_1_591636.mat',
-        'PaviaU_gt_traintest_s200_2_2255d5.mat',
-        'PaviaU_gt_traintest_s200_3_628d0a.mat',
-        'PaviaU_gt_traintest_s200_4_26eddf.mat',
-        'PaviaU_gt_traintest_s200_5_25dd01.mat',
-        'PaviaU_gt_traintest_s200_6_2430e7.mat',
-        'PaviaU_gt_traintest_s200_7_409d67.mat',
-        'PaviaU_gt_traintest_s200_8_f79373.mat',
-        'PaviaU_gt_traintest_s200_9_dac1e4.mat']
+    masks = ['PaviaU_strictsinglesite_trainval_s90_0_700083.mat',
+'PaviaU_strictsinglesite_trainval_s90_1_509297.mat',
+'PaviaU_strictsinglesite_trainval_s90_2_291093.mat',
+'PaviaU_strictsinglesite_trainval_s90_3_232341.mat',
+'PaviaU_strictsinglesite_trainval_s90_4_833337.mat',
+'PaviaU_strictsinglesite_trainval_s90_5_672053.mat',
+'PaviaU_strictsinglesite_trainval_s90_6_215589.mat',
+'PaviaU_strictsinglesite_trainval_s90_7_553699.mat',
+'PaviaU_strictsinglesite_trainval_s90_8_734449.mat',
+'PaviaU_strictsinglesite_trainval_s90_9_484519.mat']
     
+    # masks = [os.path.join('/scratch0/ilya/locDoc/data/hyperspec/',m) for m in masks]
+    # perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_paviaU_s200_10trials_full_new.npz', save_features=True)
+#     masks = ['PaviaU_strictsinglesite_trainval_s50_0_979087.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_1_270161.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_2_259715.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_3_107251.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_4_729473.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_5_129325.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_6_927653.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_7_627051.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_8_525881.mat',
+# 'PaviaU_strictsinglesite_trainval_s50_9_785489.mat']
+
+
     masks = [os.path.join('/scratch0/ilya/locDoc/data/hyperspec/',m) for m in masks]
-    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_paviaU_s200_10trials_full_new.npz', save_features=True)
-    masks = ['PaviaU_strictsinglesite_trainval_s20_0_276673.mat',
-'PaviaU_strictsinglesite_trainval_s20_1_795837.mat',
-'PaviaU_strictsinglesite_trainval_s20_2_161741.mat',
-'PaviaU_strictsinglesite_trainval_s20_3_814061.mat',
-'PaviaU_strictsinglesite_trainval_s20_4_185963.mat',
-'PaviaU_strictsinglesite_trainval_s20_5_950681.mat',
-'PaviaU_strictsinglesite_trainval_s20_6_578647.mat',
-'PaviaU_strictsinglesite_trainval_s20_7_081381.mat',
-'PaviaU_strictsinglesite_trainval_s20_8_124503.mat',
-'PaviaU_strictsinglesite_trainval_s20_9_310413.mat']
-    masks = [os.path.join('/scratch0/ilya/locDoc/data/hyperspec/',m) for m in masks]
-    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_paviaU_strictsingle_site_s20_10trials.npz', save_features=True)
+    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_paviaU_strictsingle_site_s90_10trials.npz', save_features=True)
 
 def Botswana():
     dataset = 'Botswana'
-    masks = ['Botswana_singlesite_trainval_s03_0_431593.mat',
-            'Botswana_singlesite_trainval_s03_1_422869.mat',
-            'Botswana_singlesite_trainval_s03_2_942165.mat',
-            'Botswana_singlesite_trainval_s03_3_066225.mat',
-            'Botswana_singlesite_trainval_s03_4_842055.mat',
-            'Botswana_singlesite_trainval_s03_5_256397.mat',
-            'Botswana_singlesite_trainval_s03_6_976203.mat',
-            'Botswana_singlesite_trainval_s03_7_784583.mat',
-            'Botswana_singlesite_trainval_s03_8_588663.mat',
-            'Botswana_singlesite_trainval_s03_9_484915.mat']
+    masks = ['Botswana_strictsinglesite_trainval_s20_0_840407.mat',
+'Botswana_strictsinglesite_trainval_s20_1_027359.mat',
+'Botswana_strictsinglesite_trainval_s20_2_059593.mat',
+'Botswana_strictsinglesite_trainval_s20_3_800757.mat',
+'Botswana_strictsinglesite_trainval_s20_4_848729.mat',
+'Botswana_strictsinglesite_trainval_s20_5_309369.mat',
+'Botswana_strictsinglesite_trainval_s20_6_913005.mat',
+'Botswana_strictsinglesite_trainval_s20_7_508879.mat',
+'Botswana_strictsinglesite_trainval_s20_8_218687.mat',
+'Botswana_strictsinglesite_trainval_s20_9_288573.mat']
 
-    masks = [os.path.join('/scratch0/ilya/locDoc/data/hyperspec/',m) for m in masks]
-    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_Bots_singlesite_s03_10trials_new.npz')
+    masks = [os.path.join('/cfarhomes/ilyak/ilyakavalerov@gmail.com/ramawks69/pyfst/masks/',m) for m in masks]
+    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_Bots_singlesite_s20_10trials.npz')
 
 def KSC():
     dataset = 'KSC'
-    masks = ['KSC_strictsinglesite_trainval_s20_0_132440.mat',
-        'KSC_strictsinglesite_trainval_s20_1_756652.mat',
-        'KSC_strictsinglesite_trainval_s20_2_250680.mat',
-        'KSC_strictsinglesite_trainval_s20_3_119240.mat',
-        'KSC_strictsinglesite_trainval_s20_4_767740.mat',
-        'KSC_strictsinglesite_trainval_s20_5_192528.mat',
-        'KSC_strictsinglesite_trainval_s20_6_563040.mat',
-        'KSC_strictsinglesite_trainval_s20_7_680204.mat',
-        'KSC_strictsinglesite_trainval_s20_8_611960.mat',
-        'KSC_strictsinglesite_trainval_s20_9_596964.mat']
+    masks = ['KSC_strictsinglesite_trainval_s50_0_665848.mat',
+'KSC_strictsinglesite_trainval_s50_1_783796.mat',
+'KSC_strictsinglesite_trainval_s50_2_455308.mat',
+'KSC_strictsinglesite_trainval_s50_3_643924.mat',
+'KSC_strictsinglesite_trainval_s50_4_514244.mat',
+'KSC_strictsinglesite_trainval_s50_5_762052.mat',
+'KSC_strictsinglesite_trainval_s50_6_668196.mat',
+'KSC_strictsinglesite_trainval_s50_7_990120.mat',
+'KSC_strictsinglesite_trainval_s50_8_191432.mat',
+'KSC_strictsinglesite_trainval_s50_9_307364.mat']
 
     masks = [os.path.join('/scratch0/ilya/locDoc/data/hyperspec/', m) for m in masks]
-    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_KSC_strictsinglesite_s20_10trials.npz', save_features=True)
+    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_KSC_strictsinglesite_s50_10trials.npz', save_features=True)
+
+def IP():
+    dataset = 'IP'
+    masks = ['IP_strictsinglesite_trainval_s20_0_211328.mat',
+'IP_strictsinglesite_trainval_s20_1_881136.mat',
+'IP_strictsinglesite_trainval_s20_2_869530.mat',
+'IP_strictsinglesite_trainval_s20_3_014114.mat',
+'IP_strictsinglesite_trainval_s20_4_586540.mat',
+'IP_strictsinglesite_trainval_s20_5_805378.mat',
+'IP_strictsinglesite_trainval_s20_6_666022.mat',
+'IP_strictsinglesite_trainval_s20_7_581782.mat',
+'IP_strictsinglesite_trainval_s20_8_901868.mat',
+'IP_strictsinglesite_trainval_s20_9_778852.mat']
+
+    masks = [os.path.join('/cfarhomes/ilyak/ilyakavalerov@gmail.com/ramawks69/pyfst/masks/', m) for m in masks]
+    perform_gridsearch(dataset, masks, specs1(), outfile='gridsearch_IP_strictsinglesite_s20_10trials.npz', save_features=True)
+
 
 
 def main():
-    paviaU()
-    # Botswana()
-    # KSC()
+    # paviaU()
+    Botswana()
+    # IP()
 
 if __name__ == '__main__':
     main()

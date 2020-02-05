@@ -19,7 +19,7 @@ import argparse
 import numpy as np
 from PIL import Image
 import scipy.io as sio
-from sklearn.svm import SVC
+from sklearn.svm import SVC, LinearSVC
 import tensorflow as tf
 #tf.logging.set_verbosity(tf.logging.ERROR)
 from tqdm import tqdm
@@ -32,11 +32,12 @@ from rle import myrlestring
 import fst3d_feat as fst
 from hsi_data import load_data, multiversion_matfile_get_field, get_train_val_splits, nclass_dict, dset_dims, dset_filenames_dict, dset_fieldnames_dict, pca_embedding, tupsum
 import DFFN
+from AP import build_profile, aptoula_net
 
 import pdb
 
-PB_EXPORT_DIR = 'best_loss' # protobuffer for tf serving
-PB_EXPORT_DIR2 = 'best_acc' # protobuffer for tf serving
+PB_EXPORT_DIR2 = 'best_loss' # protobuffer for tf serving
+PB_EXPORT_DIR = 'best_acc' # protobuffer for tf serving
 DATA_PATH = '/scratch0/ilya/locDoc/data/hyperspec'
 DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
 PAD_TYPE = 'symmetric'
@@ -123,7 +124,7 @@ def scat3d_to_3d_nxn_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         U2 = tf.transpose(U2, [1, 2, 3, 4, 0])
         # U2 is (lambda2, bands, h, w, 1)
 
-        # convolve with phis
+        # convolve with phi
         S2 = fst.scat3d(U2, phi, layer_params[2])
 
         def slice_idxs(sig_size, kernel_size):
@@ -471,6 +472,50 @@ def spec_to_str(spec):
     c = spec.phi
     return '%i-%i-%i_%i-%i-%i_%i-%i-%i' % (a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2])
 
+def dlgrf_filter(data, kernel_size=[21,21,21], sigmas=[2,2,2], patch_size=101):
+    """
+    """
+    s = time.time()
+    filter_obj = win.dlrgf_factory(kernel_size, sigmas)
+    layer_params = layerO((1,1,1), 'valid')
+    
+    [height, width, nbands] = data.shape
+    hyper_pixel_shape = (1, 1,data.shape[2])
+    
+    padding = (kernel_size[0]-1, kernel_size[1]-1, 0)
+    ap = np.array(padding)
+    assert np.all(ap[:2] % 2 == 0), 'Assymetric padding is not supported'
+    
+    padded_data = np.pad(data, ((ap[0]//2,ap[0]//2),(ap[1]//2,ap[1]//2),(ap[2]//2,ap[2]//2)), PAD_TYPE)
+    
+    # cover the data with patches
+    patch_xs = [max(0,width - (x*patch_size)) for x in range(1, width // patch_size + 2)]
+    patch_ys = [max(0,height - (y*patch_size)) for y in range(1, height // patch_size + 2)]
+    patch_ul_corners = itertools.product(patch_xs, patch_ys) # upper left corners
+
+    addl_spatial_pad = (patch_size-1, patch_size-1, 0)
+    batch_item_shape = tupsum(hyper_pixel_shape, padding, addl_spatial_pad)
+    
+    x = tf.placeholder(tf.float32, shape=batch_item_shape)
+    feat = fst.conv3dfeat(x, filter_obj, layer_params, patch_size)
+    feat_shape = tuple([int(d) for d in feat.shape])
+    
+    new_data = np.zeros((height,width,feat_shape[2]))
+    
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+
+        for pixel_i, pixel in enumerate(tqdm(patch_ul_corners, desc='Performing DLGRF: ', total=len(patch_xs)*len(patch_ys))):
+            [pixel_x, pixel_y] = pixel
+            subimg = padded_data[pixel_y:(patch_size+pixel_y+ap[0]), pixel_x:(patch_size+pixel_x+ap[1]), :]
+            feed_dict = {x: subimg}
+            new_data[pixel_y:(patch_size+pixel_y), pixel_x:(patch_size+pixel_x)] = sess.run(feat, feed_dict)
+
+    tf.reset_default_graph()
+    print('DLGRF preprocessing finished in %is.' % int(time.time() - s))
+    return new_data
+    
+
 def preprocess_data(data, st_net_spec, patch_size=51):
     """ST preprocess the whole data cube.
     
@@ -569,6 +614,7 @@ network_dict = {
     'DFFN_3tower_3depth': DFFN.DFFN_3tower_3depth,
     'DFFN_3tower_2depth': DFFN.DFFN_3tower_2depth,
     'DFFN_3tower_1depth': DFFN.DFFN_3tower_1depth,
+    'aptoula': aptoula_net,
 }
 sts_dict = {
     'paviaU': st_net_spec_struct([9,9,9],[9,9,9],[9,9,9]),
@@ -576,10 +622,12 @@ sts_dict = {
     '9': st_net_spec_struct([9,9,9],[9,9,9],[9,9,9]),
     '5': st_net_spec_struct([5,5,5],[5,5,5],[5,5,5]),
     '3': st_net_spec_struct([3,3,3],[3,3,3],[3,3,3]),
-    'KSC': st_net_spec_struct([5,9,9],[5,7,7],[5,7,7])
+    'KSC': st_net_spec_struct([5,9,9],[5,7,7],[5,7,7]),
+    'PU_SSS': st_net_spec_struct([9,7,7],[9,3,3],[9,3,3]),
+    'IP_SSS': st_net_spec_struct([5,9,9],[5,5,5],[5,5,5]),
 }
 
-def many_svm_evals(args):
+def many_svm_evals_BACKUP(args):
     """
     
     Like svm_predict but without the full image prediction, and for many masks.
@@ -596,10 +644,12 @@ def many_svm_evals(args):
     valid_masks = [m for m in masks if m and os.path.exists(m)]
     print("%i/%i masks valid in provided file." % (len(valid_masks), len(masks)))
     
-    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield)
+    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
         
     if args.fst_preprocessing:
         data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
+    elif args.dlgrf_preprocessing:
+        data = dlgrf_filter(data)
     
     height, width, bands = dset_dims[trainimgname]
     
@@ -632,6 +682,96 @@ def many_svm_evals(args):
     npz_path = os.path.join(args.model_root, 'SVM_results_%i.npz' % (random.randint(0,1e10)))
     np.savez(npz_path, results=results)
     print('Saved %s' % npz_path)
+
+def many_svm_evals(args):
+    """
+    
+    Messsing up this method now to get some results for DLGRF
+    """
+    bs = args.batch_size
+    n_classes = nclass_dict[args.dataset]
+    trainimgname, trainlabelname = dset_filenames_dict[args.dataset]
+    trainimgfield, trainlabelfield = dset_fieldnames_dict[args.dataset]
+    st_net_spec = sts_dict[args.st_type]
+    
+    mask_list_f = open(args.svm_multi_mask_file_list, "r")
+    masks = [line.strip() for line in mask_list_f.readlines() if line != "\n"]
+    mask_list_f.close()
+    valid_masks = [m for m in masks if m and os.path.exists(m)]
+    print("%i/%i masks valid in provided file." % (len(valid_masks), len(masks)))
+    
+    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
+        
+    if args.fst_preprocessing:
+        data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
+    
+    assert args.dlgrf_preprocessing, 'Dude this method is messed up for testing dlgrf'
+    
+    my_sigmas = []
+    # for i in reversed(range(2,6)):
+    #     for j in range(2,6):
+    #         my_sigmas.append([i,j,j])
+    my_sigma = [7,7,7]
+    my_sigmas.append(my_sigma)
+    results = {}
+    
+    for npca in range(5,105,5):
+        for gs in reversed(range(-8,4)):
+            for ks in reversed(range(-3,16)):
+                # print('START TESTING THE SIGMA {}'.format(my_sigma))
+                # print('START TESTING THE C {} Gamma {}'.format(ks, gs))
+                
+                # ks=21
+                # data_new = dlgrf_filter(data, kernel_size=[ks,ks,ks], sigmas=my_sigma, patch_size=51)
+                data_new = pca_embedding(data, n_components=npca)
+                # data_new = data
+                
+                height, width, bands = dset_dims[trainimgname]
+                
+                # results = {}
+                
+                for mask_path in valid_masks:
+                    # 2 mask roots are not currently supported, if datasets for train/val are different
+                    train_mask = multiversion_matfile_get_field(mask_path, 'train_mask')
+                    val_mask = multiversion_matfile_get_field(mask_path, 'test_mask')
+                       
+                    s = args.network_spatial_size - 1
+                    trainX, trainY, valX, valY = get_train_val_splits(data_new, labels, train_mask, val_mask, (s,s,0))
+                    
+                    print('starting training')
+                    start = time.time()
+                    # clf = SVC(kernel='linear',decision_function_shape='ovo') # 52
+                    # clf = LinearSVC(C=2**ks) # 57 with C=1, 68 with C=10, , multi_class='crammer_singer' and tol make no difference, best is 128
+                    clf = SVC(C=2**ks, gamma=2**gs) # 74
+                    # clf = SVC(kernel='linear', C=1000)
+                    # clf = SVC(kernel='linear') # 52
+                    clf.fit(trainX.squeeze(), trainY)
+                    end = time.time()
+                    print('Training done. Took %is' % int(end - start))
+                    
+                    # from lib.libsvm.python.svmutil import *
+                    # prob = svm_problem(trainY.tolist(), trainX.squeeze().tolist())
+                    # param = svm_parameter()
+                    # param.kernel_type = LINEAR
+                    # param.C = 10
+                    # m=svm_train(prob, param)
+                    # svm_predict(valY.tolist(), valX.squeeze().tolist(), m) # 62
+                    
+                    n_correct = 0
+                    for i in tqdm(range(0,valY.shape[0],bs), desc='Getting Val Accuracy'):
+                        p_label = clf.predict(valX.squeeze()[i:i+bs]);
+                        n_correct += (p_label == valY[i:i+bs]).sum()
+                    acc = float(n_correct) / valY.shape[0]
+                    
+                    print('Done with %s' % mask_path )
+                    print('SVM has validation accuracy %.2f' % (acc*100) )
+                    id_ = '%i_%i_%i' % (npca, gs, ks)
+                    results[id_] = acc
+                
+            npz_path = os.path.join(args.model_root, 'SVM_results_%i.npz' % (random.randint(0,1e10)))
+            np.savez(npz_path, results=results)
+            print('Saved %s' % npz_path)
+            print('DONE TESTING THE SIGMA {}'.format(my_sigma))
     
     
 
@@ -650,7 +790,7 @@ def svm_predict(args):
     train_mask = multiversion_matfile_get_field(args.mask_root, 'train_mask')
     val_mask = multiversion_matfile_get_field(args.mask_root, 'test_mask')
     
-    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield)
+    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
     
     if args.fst_preprocessing:
         data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
@@ -705,13 +845,15 @@ def predict(args):
     trainimgfield, trainlabelfield = dset_fieldnames_dict[args.dataset]
     st_net_spec = sts_dict[args.st_type]
     
-    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield)
+    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
     
     if args.fst_preprocessing:
         data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
     elif args.npca_components is not None:    
         data = pca_embedding(data, n_components=args.npca_components)
-    
+        if args.attribute_profile:
+            data = build_profile(data) 
+
     height, width, bands = dset_dims[trainimgname]
     
     # if there are multiple saved *pb files get the newest
@@ -761,12 +903,14 @@ def train(args):
     train_mask = multiversion_matfile_get_field(args.mask_root, 'train_mask')
     val_mask = multiversion_matfile_get_field(args.mask_root, 'test_mask')
     
-    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield)
+    data, labels = load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=args.data_root)
     
     if args.fst_preprocessing:
         data = load_or_preprocess_data(data, args.preprocessed_data_path, args.model_root, st_net_spec=st_net_spec, st_patch_size=args.st_patch_size)
     elif args.npca_components is not None:    
         data = pca_embedding(data, n_components=args.npca_components)
+        if args.attribute_profile:
+            data = build_profile(data)
             
     s = args.network_spatial_size - 1
     trainX, trainY, valX, valY = get_train_val_splits(data, labels, train_mask, val_mask, (s,s,0))
@@ -892,7 +1036,7 @@ def train(args):
             n_nondecreasing_evals += 1
             tf.logging.info("Eval Loss did not decrease %i/%i times." % (n_nondecreasing_evals, args.terminate_if_n_nondecreasing_evals))
         
-        if False: #e['accuracy'] > best_acc or e['loss'] < best_loss:
+        if e['accuracy'] > best_acc or e['loss'] < best_loss:
             
             test_e = model.evaluate(test_input_fn, name='test')
             if e['accuracy'] > best_acc:
@@ -945,6 +1089,9 @@ def main():
         help='If not None, run eval using an SVM on data features. This is a path to a txt file with masks to use (default: %(default)s)')
     # Important optionals
     parser.add_argument(
+        '--data_root', type=str, default='/scratch0/ilya/locDoc/data/hyperspec/datasets',
+        help='Where to find the HSI data cube .mat files (default: %(default)s)')
+    parser.add_argument(
         '--network', type=str, default=None,
         help='Name of network to run')
     parser.add_argument(
@@ -953,6 +1100,9 @@ def main():
     parser.add_argument(
         '--fst_preprocessing', action='store_true', default=False,
         help='If true load data with fourier scattering preprocessing (default: %(default)s)')
+    parser.add_argument(
+        '--dlgrf_preprocessing', action='store_true', default=False,
+        help='If true load data with DLGRF preprocessing (default: %(default)s)')
     parser.add_argument(
         '--st_type', default='paviaU',
         help='Used when supplying --fst_preprocessing.')
@@ -987,6 +1137,9 @@ def main():
     parser.add_argument(
         '--terminate_if_n_nondecreasing_evals', type=int, default=10,
         help='If Eval Loss does not decrease for N consecutive eval periods, then terminate training.')
+    parser.add_argument(
+        '--attribute_profile', action='store_true', default=False,
+        help='If true ...')
 
     args = parser.parse_args()
 

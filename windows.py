@@ -180,6 +180,65 @@ def fst3d_psi_window_3D(m1divM1, m2divM2, m3divM3, kernel_size):
 def fst3d_psi_window_3D_coordinate(m1divM1,m2divM2,m3divM3,x,y,b):
     return np.exp( 2*np.pi*1j*(m1divM1*x + m2divM2*y + m3divM3*b) )
 
+def dlrgf_window_3D_coordinate(omegavec, sigmavec, x,y,b):
+    """
+    page 1384, bottom left column
+    """
+    sx, sy, sb = sigmavec
+    omegax,omegay,omegab = omegavec
+    return 1 / ((2*np.pi)**1.5 *sx*sy*sb) * np.exp( -( (x/sx)**2 + (y/sy)**2 + (b/sb)**2)/2.0 ) * np.cos(omegax*x) * np.cos(omegay*y) * np.sin(omegab*b)
+
+
+def params2omegas(modomega, phi, theta):
+    """
+    Returns:
+      omegax,omegay,omegab
+    
+    page 1383, bottom left column
+    """
+    return (modomega * np.sin(phi)*np.cos(theta),modomega * np.sin(phi)*np.sin(theta),  modomega * np.cos(phi))
+
+def dlrgf_window_3D(omegavec, sigmavec, kernel_size):
+    sx, sy, sb = sigmavec
+    # we will sample within 2 std deviations bc 95% of the energy is there
+    x_pts = np.linspace(-2*sx, 2*sx, kernel_size[0])
+    y_pts = np.linspace(-2*sy, 2*sy, kernel_size[1])
+    b_pts = np.linspace(-2*sb, 2*sb, kernel_size[2])
+
+    coords = np.array(list(itertools.product(x_pts, y_pts, b_pts)))
+
+    x_idxs = np.linspace(0, kernel_size[0]-1, kernel_size[0], dtype=int)
+    y_idxs = np.linspace(0, kernel_size[1]-1, kernel_size[1], dtype=int)
+    b_idxs = np.linspace(0, kernel_size[2]-1, kernel_size[2], dtype=int)
+
+    coords_idxs = np.array(list(itertools.product(x_idxs, y_idxs, b_idxs)))
+
+    kernel = np.zeros(kernel_size, dtype=np.float32)
+    for coord_i, coord in enumerate(coords):
+        x_i,y_i,b_i = coords_idxs[coord_i]
+        x,y,b = coords[coord_i]
+        kernel[x_i,y_i,b_i] = dlrgf_window_3D_coordinate(omegavec, sigmavec, float(x),float(y),float(b))
+    # 
+    return kernel / np.linalg.norm(kernel)
+
+def dlrgf_factory(kernel_size, sigmavec):
+    """    
+    """    
+    nfilt = 52
+    # page 1388 middle left column
+    params = list(itertools.product([np.pi/2, np.pi/4, np.pi/8, np.pi/16], [0, np.pi/4, np.pi/2, 3*np.pi/4], [0, np.pi/4, np.pi/2, 3*np.pi/4]))
+    omegavecs = list(set([params2omegas(*param_) for param_ in params]))
+    assert len(omegavecs) == nfilt, 'Inconsistent number of filters'
+    
+    filters = np.zeros(kernel_size + [nfilt], dtype=np.float)
+    
+
+    for idx, omegavec in enumerate(omegavecs):
+        filters[:,:,:,idx] = dlrgf_window_3D(omegavec, sigmavec, kernel_size)
+
+    return winO(nfilt, filters, omegavecs, kernel_size)
+
+
 def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False, filt_steps_ovr=None):
     """
     Args:

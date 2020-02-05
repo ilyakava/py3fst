@@ -16,6 +16,7 @@ from tqdm import tqdm
 import pdb
 
 DATASET_PATH = '/scratch0/ilya/locDoc/data/hyperspec/datasets'
+# DATASET_PATH = '/scratch2/ilyak/locDoc/data/hyperspec/datasets'
 PAD_TYPE = 'symmetric'
 
 nclass_dict = {
@@ -49,16 +50,16 @@ dset_fieldnames_dict = {
 }
 
 
-def load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield):
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainimgname))
+def load_data(trainimgname, trainimgfield, trainlabelname, trainlabelfield, dataset_path=DATASET_PATH):
+    mat_contents = sio.loadmat(os.path.join(dataset_path, trainimgname))
     data = mat_contents[trainimgfield].astype(np.float32)
     data /= np.max(np.abs(data))
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
+    mat_contents = sio.loadmat(os.path.join(dataset_path, trainlabelname))
     labels = mat_contents[trainlabelfield]
     return data, labels
 
-def load_labels(trainlabelname, trainlabelfield):
-    mat_contents = sio.loadmat(os.path.join(DATASET_PATH, trainlabelname))
+def load_labels(trainlabelname, trainlabelfield, dataset_path=DATASET_PATH):
+    mat_contents = sio.loadmat(os.path.join(dataset_path, trainlabelname))
     labels = mat_contents[trainlabelfield]
     return labels
     

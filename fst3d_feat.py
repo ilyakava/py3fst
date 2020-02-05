@@ -65,6 +65,42 @@ def scat3d(x, win_params, layer_params):
 
     return tf.abs(tf.complex(real1, imag1))
 
+def conv3dfeat(x, win_params, layer_params, final_size):
+    """3D filters and concats a cube.
+    Args:
+        x is input with dim (h,w,bands)
+        win_params.filters is float32 with dim (depth, height, width, channels)
+    Returns:
+        cube that is (h,w,bands)
+        
+        
+    Says that the magnitude of the filtering result is the feature
+    """
+    x = tf.transpose(x, [2, 0, 1])
+
+    x = tf.expand_dims(x, 0)
+    x = tf.expand_dims(x, -1)
+    conv1 = tf.layers.conv3d(
+        x,
+        win_params.nfilt,
+        win_params.kernel_size,
+        strides=layer_params.strides,
+        padding=layer_params.padding,
+        dilation_rate=(1,1,1),
+        activation=None,
+        use_bias=False,
+        kernel_initializer=tf.constant_initializer(win_params.filters, dtype=tf.float32),
+        trainable=False,
+        name=None
+    )
+    # x is now (1,bands,h,w,nfilt)
+    conv1 = tf.transpose(conv1, [0,4,1,2,3])
+    # x is now (1,nfilt,bands,h,w)
+    feat = tf.reshape(conv1, [-1,final_size, final_size])
+    feat = tf.transpose(feat, [1,2,0])
+    return tf.abs(feat)
+    # return feat
+
 def kernel_padding(kernel_size):
     def int_padding(n):
         if n % 2 == 0:

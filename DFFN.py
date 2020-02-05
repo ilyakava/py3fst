@@ -103,7 +103,7 @@ def DFFN_3tower_5depth(x_dict, dropout, reuse, is_training, n_classes):
         # end
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
 
 
 def DFFN_3tower_4depth(x_dict, dropout, reuse, is_training, n_classes):
@@ -153,7 +153,7 @@ def DFFN_3tower_4depth(x_dict, dropout, reuse, is_training, n_classes):
         # end
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
 
 def DFFN_3tower_3depth(x_dict, dropout, reuse, is_training, n_classes):
     """Three towers. Each depth 3.
@@ -197,7 +197,7 @@ def DFFN_3tower_3depth(x_dict, dropout, reuse, is_training, n_classes):
         # end
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
 
 def DFFN_3tower_2depth(x_dict, dropout, reuse, is_training, n_classes):
     """Three towers. Each depth 2.
@@ -238,7 +238,7 @@ def DFFN_3tower_2depth(x_dict, dropout, reuse, is_training, n_classes):
         # end
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
 
 def DFFN_3tower_1depth(x_dict, dropout, reuse, is_training, n_classes):
     """Three towers. Each depth 1.
@@ -277,7 +277,7 @@ def DFFN_3tower_1depth(x_dict, dropout, reuse, is_training, n_classes):
         # end
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
     
 def DFFN_2tower_1depth(x_dict, dropout, reuse, is_training, n_classes):
     """Two towers. Each depth 1.
@@ -308,5 +308,5 @@ def DFFN_2tower_1depth(x_dict, dropout, reuse, is_training, n_classes):
         
         fuse = tf.reduce_mean(fuse, axis=(1,2), keepdims=True) # avg pooling
         fuse = tf.layers.dense(fuse, n_classes)
-    return tf.squeeze(fuse)
+    return tf.squeeze(fuse, axis=(1,2))
 
