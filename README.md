@@ -6,12 +6,14 @@ Please cite:
 @article{tfST,
 	title={Three-Dimensional Fourier Scattering Transform and Classification of Hyperspectral Images},
 	author={Ilya Kavalerov and Weilin Li and Wojciech Czaja and Rama Chellappa},
-	journal={arXiv preprint arXiv:TBA},
+	journal={arXiv preprint arXiv:1906.06804},
 	year={2019}
 }
 ```
 
 ### Usage
+
+Instructions coming Feb 14 2020...
 
 ### Downloading Data
 
