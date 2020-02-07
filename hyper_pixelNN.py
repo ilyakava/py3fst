@@ -46,15 +46,15 @@ layerO = namedtuple('layerO', ['strides', 'padding'])
 
 # in nm/pixel
 bandwidth_dict = {
-    'PaviaU': 9,
-    'PaviaCR': 9,
+    'PaviaU': 430 / 103.0,
     'Botswana': 2100 / 242.0,
-    'KSC': 2100 / 224.0
+    'KSC': 2100 / 224.0,
+    'IP': 2100 / 224.0
 }
 # in meters/pix
 spatial_res_dict = {
-    'PaviaU': 9,
-    'PaviaCR': 9,
+    'PaviaU': 1.3,
+    'IP': 3.7,
     'Botswana': 30.0,
     'KSC': 18.0
 }
@@ -63,7 +63,7 @@ spatial_res_dict = {
 
 ############ END OF CONSTANTS
 
-def scat3d_to_3d_nxn_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None, final_size=5):
+def scat3d_to_3d_nxn_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_params=None, final_size=5, tang_mode=False):
     """Computes features for a specific pixel.
 
     Args:
@@ -108,10 +108,17 @@ def scat3d_to_3d_nxn_2layer(x, reuse=tf.AUTO_REUSE, psis=None, phi=None, layer_p
         
         U2s = []
         # only procede with increasing frequency paths
-        for res_i, used_params in enumerate(psis[0].filter_params[::lambda1_d]):
-            increasing_psi = win.fst3d_psi_factory(psis[1].kernel_size, used_params)
-            if increasing_psi.nfilt > 0:
-                U2s.append(fst.scat3d(U1[res_i:(res_i+1),:,:,:,:], increasing_psi, layer_params[1]))
+        
+        if tang_mode:
+            for res_i, used_params in enumerate(psis[0].filter_params[::lambda1_d]):
+                increasing_psi = win.tang_psi_factory(3, 3, psis[1].kernel_size, used_params[0])
+                if increasing_psi.nfilt > 0:
+                    U2s.append(fst.scat3d(U1[res_i:(res_i+1),:,:,:,:], increasing_psi, layer_params[1]))
+        else:
+            for res_i, used_params in enumerate(psis[0].filter_params[::lambda1_d]):
+                increasing_psi = win.fst3d_psi_factory(psis[1].kernel_size, used_params)
+                if increasing_psi.nfilt > 0:
+                    U2s.append(fst.scat3d(U1[res_i:(res_i+1),:,:,:,:], increasing_psi, layer_params[1]))
         
         U2 = tf.concat(U2s, 4)
         # U2 is (1,bands,h,w,lambda2)
@@ -475,6 +482,19 @@ def preprocess_data(data, st_net_spec, patch_size=51):
         net_addl_padding = (h,w,b)
         layer_params=[layer_params]
         preprocessing_mode = 'Gabor'
+    elif st_net_spec.psi1 is None and st_net_spec.psi2 is None and st_net_spec.phi is None: # tang WST
+        # OK I am sorry for this temporary kludge, will make a new st_net_spec struct soon
+        print('Will perform Tang-WST...')
+        preprocessing_mode = 'Tang-WST'
+        kernel_size = [7,7,7]
+        max_scale = 3
+        K = 3
+    
+        psi = win.tang_psi_factory(max_scale, K, kernel_size)
+        psis=[psi,psi]
+        phi = win.tang_phi_window_3D(max_scale, kernel_size)
+        net_addl_padding = net_addl_padding_from_spec(st_net_spec_struct(kernel_size,kernel_size,kernel_size))
+        layer_params=[layer_params, layer_params, layer_params]
     else:
         raise ValueError('This ST spec is not supported')
 
@@ -506,6 +526,9 @@ def preprocess_data(data, st_net_spec, patch_size=51):
         feat = scat3d_to_3d_nxn_2layer(x, reuse, psis, phi, layer_params, final_size=patch_size)
     elif preprocessing_mode == 'Gabor':
         feat = gabor_mag_filter(x, reuse, psis, layer_params, final_size=patch_size)
+    elif preprocessing_mode == 'Tang-WST':
+        feat = scat3d_to_3d_nxn_2layer(x, reuse, psis, phi, layer_params, final_size=patch_size, tang_mode=True)
+        
     compile_time = time.time() - compile_start
     feat_shape = tuple([int(d) for d in feat.shape])
     print('Graph Compiled %is. Feature dimension per pixel is now %i.' % (int(compile_time), feat_shape[2]))
@@ -568,10 +591,15 @@ sts_dict = {
     '9': st_net_spec_struct([9,9,9],[9,9,9],[9,9,9]),
     '5': st_net_spec_struct([5,5,5],[5,5,5],[5,5,5]),
     '3': st_net_spec_struct([3,3,3],[3,3,3],[3,3,3]),
+    'Botswana': st_net_spec_struct([7,7,7],[7,5,5],[7,5,5]),
     'KSC': st_net_spec_struct([5,9,9],[5,7,7],[5,7,7]),
     'PU_SSS': st_net_spec_struct([9,7,7],[9,3,3],[9,3,3]),
     'IP_SSS': st_net_spec_struct([5,9,9],[5,5,5],[5,5,5]),
     'IP_gabor': st_net_spec_struct([5,9,9],None,None),
+    'PU_gabor': st_net_spec_struct([9,7,7],None,None),
+    'KSC_gabor': st_net_spec_struct([5,9,9],None,None),
+    'Botswana_gabor': st_net_spec_struct([7,7,7],None,None),
+    'tang': st_net_spec_struct(None,None,None),
 }
 
 def many_svm_evals(args):
@@ -612,7 +640,7 @@ def many_svm_evals(args):
         
         print('starting training')
         start = time.time()
-        clf = SVC(kernel='linear')
+        clf = SVC(kernel='linear', C=args.svm_regularization_param)
         clf.fit(trainX.squeeze(), trainY)
         end = time.time()
         print('Training done. Took %is' % int(end - start))
@@ -995,6 +1023,9 @@ def main():
     parser.add_argument(
         '--attribute_profile', action='store_true', default=False,
         help='If true ...')
+    parser.add_argument(
+        '--svm_regularization_param', type=float, default=1000.0,
+        help='SVC(C=this)')
 
     args = parser.parse_args()
 
