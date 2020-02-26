@@ -1,4 +1,4 @@
-"""Iterate through hyperparams to get accuracies
+"""Iterate through hyperparams of ST to get accuracies
 """
 
 import os

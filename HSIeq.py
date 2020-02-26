@@ -1,3 +1,9 @@
+"""Creates a false color image from HSI data by averaging neighboring bands.
+Launches a GUI where gaussian weighted neigboring bands in a user
+defined window are averaged together to form each new RGB band.
+"""
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
