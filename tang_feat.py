@@ -137,6 +137,68 @@ def tang_net(x, reuse=tf.AUTO_REUSE):
 
     return tf.concat([S0,S1,S2], 0)
 
+def tang_save_features(data, labels, groundtruthfilename='100p'):
+    """temp kludge
+    """
+    [height, width, nbands] = data.shape
+    x = tf.placeholder(tf.float32, shape=(19,19,nbands+18))
+    feat = tang_net(x)
+    
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+
+    padded_data = np.pad(data, ((9,9),(9,9),(9,9)), 'reflect')
+
+
+
+    all_pixels = np.array(list(itertools.product(range(width),range(height))))
+    labelled_pixels = all_pixels[:10]
+    
+    print('requesting %d MB memory' % (labelled_pixels.shape[0] * 271*nbands * 4 / 1000000.0))
+    labelled_pix_feat = np.zeros((labelled_pixels.shape[0], 271*nbands), dtype=np.float32)
+
+    for pixel_i, pixel in enumerate(tqdm(labelled_pixels)):
+        # this iterates through columns first
+        [pixel_x, pixel_y] = pixel
+        subimg = padded_data[pixel_y:(pixel_y+19), pixel_x:(pixel_x+19), :]
+    
+        feed_dict = {x: subimg}
+        labelled_pix_feat[pixel_i,:] = sess.run(feat, feed_dict)
+
+    pdb.set_trace()
+    flat_labels = labels.transpose().reshape(height*width)
+    trainY = flat_labels[flat_labels!=0]
+    
+    print('starting training')
+    start = time.time()
+    clf = SVC(kernel='linear')
+    clf.fit(labelled_pix_feat, trainY)
+    end = time.time()
+    print(end - start)
+
+    # now start predicting the full image, 1 column at a time
+    col_feat = np.zeros((height, 271*nbands), dtype=np.float32)
+    pred_image = np.zeros((height,width), dtype=int)
+    test_flags = '-q'
+    for pixel_x in tqdm(range(width)):
+        # get feat
+        for pixel_y in range(height):
+            subimg = padded_data[pixel_y:(pixel_y+19), pixel_x:(pixel_x+19), :]
+            feed_dict = {x: subimg}
+            col_feat[pixel_y,:] = sess.run(feat, feed_dict)
+    
+        # get pred for feat
+        # dontcare = [0] * height
+        p_label = clf.predict(col_feat);
+        pred_image[:,pixel_x] = np.array(p_label).astype(int)
+
+    imgmatfiledata = {}
+    imgmatfiledata[u'imgHat'] = pred_image
+    imgmatfiledata[u'groundtruthfilename'] = groundtruthfilename
+    hdf5storage.write(imgmatfiledata, filename=groundtruthfilename+'_100p_tang_fullimg.mat', matlab_compatible=True)
+    print('done making img, run hundredpercent_img_figures.m')
+
+
 def tang_run_full_img(data, labels, groundtruthfilename='100p'):
     """
     """
@@ -293,7 +355,7 @@ def tang_run_all_full_imgs():
     data /= np.max(np.abs(data))
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana_gt.mat'))
     labels = mat_contents['Botswana_gt']
-    tang_run_full_img(data, labels, groundtruthfilename='Botswana_gt')
+    tang_save_features(data, labels, groundtruthfilename='Botswana_gt')
     
     # # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'KSC.mat'))
     # # data = mat_contents['KSC'].astype(np.float32)
@@ -427,8 +489,8 @@ def tang_run_accs():
     # tang_run_acc(data, labels, traintestfilenames=traintestfilenames[:1])
 
 if __name__ == '__main__':
-    tang_run_accs()
-    # tang_run_all_full_imgs()
+    # tang_run_accs()
+    tang_run_all_full_imgs()
     # now
 
     # pdb.set_trace()
