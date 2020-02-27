@@ -1,29 +1,34 @@
+"""FST+NNs on audio spectrograms.
+"""
+
 from collections import namedtuple
 import glob
 import logging
 import os
 import random
 
+random.seed(2020)
 
 import argparse
 import numpy as np
 import tensorflow as tf
 
 from audio_load import load_audio_from_files, audio2spec
-from rgb_pixelNN import scat2d
+from st_2d import scat2d
 import windows as win
 
 import pdb
 
 layerO = namedtuple('layerO', ['strides', 'padding'])
 
-def wst_net_v1(x_dict, dropout, reuse, is_training, n_classes):
+def st_net_v1(x_dict, dropout, reuse, is_training, n_classes):
     """Network to follow ST preprocessing.
     
     x should be (...)
     """
     
-    psi = win.fst2d_psi_factory([7, 7], include_avg=False)
+    sz = 13
+    psi = win.fst2d_psi_factory([sz, sz], include_avg=False)
     
     layer_params = layerO((1,1), 'valid')
     nfeat = 32
@@ -33,10 +38,27 @@ def wst_net_v1(x_dict, dropout, reuse, is_training, n_classes):
         x = tf.expand_dims(x, -1)
 
 
-        # ..., ...
+        ### bs, h, w, channels
         U1 = scat2d(x, psi, layer_params)
+        h = U1.shape[1]
+        w = U1.shape[2]
+        ### bs, h, w, time varying, frequency varying
+        U1 = tf.reshape(U1, [-1, h, w, sz-1, sz-1])
+        ### bs, time varying, frequency varying, h, w
+        U1 = tf.transpose(U1, [0,3,4,1,2])
+
+        ds = (sz-1)//2
+        rategram = tf.layers.max_pooling3d(U1, (1,ds,1), (1,ds,1), padding='same')
+        scalegram = tf.layers.max_pooling3d(U1, (ds,1,1), (ds,1,1), padding='same')
+
+        nsz = (sz-1)**2 // ds
+        rategram = tf.reshape(rategram, [-1, nsz, h, w])
+        scalegram = tf.reshape(scalegram, [-1, nsz, h, w])
+
+        cortical = tf.concat([rategram, scalegram], axis=1)
+        cortical = tf.transpose(cortical, [0,2,3,1])
         
-        conv = tf.layers.conv2d(U1, nfeat, (7,1), 1, activation=tf.nn.relu)
+        conv = tf.layers.conv2d(cortical, nfeat, (7,1), 1, activation=tf.nn.relu)
         conv = tf.layers.conv2d(conv, nfeat, (1,7), 1, activation=tf.nn.relu)
         conv = tf.layers.conv2d(conv, nfeat, 5, 1, activation=tf.nn.relu)
         conv = tf.layers.conv2d(conv, nfeat, 5, 2, activation=tf.nn.relu)
@@ -51,6 +73,8 @@ def wst_net_v1(x_dict, dropout, reuse, is_training, n_classes):
 def load_data(args):
     p_files = glob.glob(args.positive_data_glob)
     n_files = glob.glob(args.negative_data_glob)
+    random.shuffle(n_files)
+    n_files = n_files[:len(p_files)]
     
     print('Loaded %i/%i positive/negative examples' % (len(p_files), len(n_files)))
     
@@ -64,6 +88,11 @@ def load_data(args):
     
     data = np.concatenate([p_specs, n_specs], axis=0).astype(np.float32)
     labels = np.concatenate([p_labels, n_labels])
+
+    # data = np.log(data+1)
+    data_m = data.min(axis=(1,2), keepdims=True)
+    data_M = data.max(axis=(1,2), keepdims=True)
+    data = (data - data_m) / (data_M - data_m)
     
     return data, labels
 
@@ -80,7 +109,7 @@ def get_train_val_splits(data, labels):
     return data[train_i], labels[train_i], data[val_i], labels[val_i]
 
 def train(args):
-    network = wst_net_v1
+    network = st_net_v1
     bs = args.batch_size
     n_classes = 1
     
@@ -162,14 +191,14 @@ def main():
                       help='Full path of where to output the results of training.')
     
     parser.add_argument(
-        '--positive_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/alexa/alexa/*/*.wav',
+        '--positive_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/alexa_8khz/*/*.wav',
         help='Where to find the audio data files (default: %(default)s)')
     parser.add_argument(
-        '--negative_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/snow/*.wav',
+        '--negative_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/libri_3s/dev-clean/*/*/*.wav',
         help='Where to find the audio data files (default: %(default)s)')
     # Hyperparams
     parser.add_argument(
-        '--lr', type=float, default=1e-3,
+        '--lr', type=float, default=1e-4,
         help='Learning rate to use (default: %(default)s)')
     parser.add_argument(
         '--batch_size', type=int, default=64,

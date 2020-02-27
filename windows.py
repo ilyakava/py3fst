@@ -149,16 +149,16 @@ def fst3d_psi_factory(kernel_size, min_freq=[0,0,0]):
     min_freq = np.array(min_freq)
     assert np.all(min_freq >= np.array([0,0,0])), 'some min freq < 0'
     assert np.all(min_freq < np.array([1,1,1])), 'some min freq >= 1'
-    filter_params = np.array(list(itertools.product(
+    filter_params = list(itertools.product(
         np.linspace(0, 1, kernel_size[0], endpoint=False),
         np.linspace(0, 1, kernel_size[1], endpoint=False),
         np.linspace(0, 1, kernel_size[2], endpoint=False)
-    )))
+    ))
     # never do any averaging
-    filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0,0])), filter_params))
+    filter_params = list(filter(lambda fp: np.all(fp > np.array([0,0,0])), filter_params))
     # remove filters with too low freq
-    filter_params = np.array(filter(lambda fp: np.all(fp >= min_freq), filter_params))
-    filter_params = np.array(filter(lambda fp: np.any(fp > min_freq), filter_params))
+    filter_params = list(filter(lambda fp: np.all(fp >= min_freq), filter_params))
+    filter_params = list(filter(lambda fp: np.any(fp > min_freq), filter_params))
     nfilt = filter_params.shape[0]
     if nfilt == 0:
         return winO(0, None, None, kernel_size)
@@ -169,7 +169,7 @@ def fst3d_psi_factory(kernel_size, min_freq=[0,0,0]):
             [mdM1, mdM2, mdM3] = filter_param
             filters[:,:,:,idx] = fst3d_psi_window_3D(mdM1, mdM2, mdM3, kernel_size)
 
-        return winO(nfilt, filters, filter_params, kernel_size)
+        return winO(nfilt, filters, np.array(filter_params), kernel_size)
 
 def fst3d_psi_window_3D(m1divM1, m2divM2, m3divM3, kernel_size):
     """
@@ -268,17 +268,18 @@ def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False, filt_steps
     assert np.all(min_freq < np.array([1,1])), 'some min freq >= 1'
     if not filt_steps_ovr:
         filt_steps_ovr = kernel_size
-    filter_params = np.array(list(itertools.product(
+    filter_params = list(itertools.product(
         np.linspace(0, 1, filt_steps_ovr[0], endpoint=False),
         np.linspace(0, 1, filt_steps_ovr[1], endpoint=False)
-    )))
+    ))
+    
     # never do any averaging
     if not include_avg:
-        filter_params = np.array(filter(lambda fp: np.all(fp > np.array([0,0])), filter_params))
+        filter_params = list(filter(lambda fp: np.all(fp > np.array([0,0])), filter_params))
     # remove filters with too low freq
-    filter_params = np.array(filter(lambda fp: np.all(fp >= min_freq), filter_params))
-    filter_params = np.array(filter(lambda fp: np.any(fp > min_freq), filter_params))
-    nfilt = filter_params.shape[0]
+    filter_params = list(filter(lambda fp: np.all(fp >= min_freq), filter_params))
+    filter_params = list(filter(lambda fp: np.any(fp > min_freq), filter_params))
+    nfilt = len(filter_params)
     if nfilt == 0:
         return winO(0, None, None, kernel_size)
     else:
@@ -289,7 +290,7 @@ def fst2d_psi_factory(kernel_size, min_freq=[0,0], include_avg=False, filt_steps
             filters[:,:,idx] = (fst3d_psi_window_3D(mdM1, mdM2, 0, kernel_size + [1]).squeeze() * \
                 np.linalg.norm(kernel_size + [1]) / np.linalg.norm(kernel_size))
 
-        return winO(nfilt, filters, filter_params, kernel_size)
+        return winO(nfilt, filters, np.array(filter_params), kernel_size)
 
 def fst2d_phi_factory(kernel_size):
     """
