@@ -42,7 +42,9 @@ Create more training/testing splits with `sites_train_val_split.py`.
 
 ## Versioning
 
-Tested on Python 2.7.14 (Anaconda), tensorflow 1.10.1, cuda 9.0.176, cudnn-7.0 (8.0 might work too). Red Hat Enterprise Linux Workstation release 7.6 (Maipo). GeForce GTX TITAN X.
+Running on: Python 3.6.9, tensorflow 1.15, cuda/10.0.130, cudnn/v7.6.5.
+
+Previously tested on Python 2.7.14 (Anaconda), tensorflow 1.10.1, cuda 9.0.176, cudnn-7.0 (8.0 might work too). Red Hat Enterprise Linux Workstation release 7.6 (Maipo). GeForce GTX TITAN X.
 
 ## License
 
