@@ -21,7 +21,7 @@ import pdb
 
 layerO = namedtuple('layerO', ['strides', 'padding'])
 
-def st_net_v1(x_dict, dropout, reuse, is_training, n_classes):
+def st_net_v1(x, dropout, reuse, is_training, n_classes):
     """Network to follow ST preprocessing.
     
     x should be (...)
@@ -34,9 +34,9 @@ def st_net_v1(x_dict, dropout, reuse, is_training, n_classes):
     nfeat = 32
     
     with tf.variable_scope('wst_net_v1', reuse=reuse):
-        x = x_dict['spectrograms']
+        # x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,256,256))
         x = tf.expand_dims(x, -1)
-
 
         ### bs, h, w, channels
         U1 = scat2d(x, psi, layer_params)
@@ -70,53 +70,39 @@ def st_net_v1(x_dict, dropout, reuse, is_training, n_classes):
         out = tf.layers.dense(fc, n_classes)
     return tf.squeeze(out, axis=1)
 
-def load_data(args):
-    p_files = glob.glob(args.positive_data_glob)
-    n_files = glob.glob(args.negative_data_glob)
-    random.shuffle(n_files)
-    n_files = n_files[:len(p_files)]
-    
-    print('Loaded %i/%i positive/negative examples' % (len(p_files), len(n_files)))
-    
-    p_samples = load_audio_from_files(p_files, "wav", 3000, 8000)
-    p_specs = audio2spec(p_samples, 160, 80, 640)
-    p_labels = np.ones(len(p_samples))
-    
-    n_samples = load_audio_from_files(n_files, "wav", 3000, 8000)
-    n_specs = audio2spec(n_samples, 160, 80, 640)
-    n_labels = np.zeros(len(n_samples))
-    
-    data = np.concatenate([p_specs, n_specs], axis=0).astype(np.float32)
-    labels = np.concatenate([p_labels, n_labels])
+def parser(serialized_example):
+  """Parses a single tf.Example into x,y tensors."""
+  features = tf.parse_single_example(
+      serialized_example,
+      features={
+          'spectrogram': tf.FixedLenFeature([256*256], tf.float32),
+          'label': tf.FixedLenFeature([], tf.int64),
+      })
+  spec = features['spectrogram']
 
-    # data = np.log(data+1)
-    data_m = data.min(axis=(1,2), keepdims=True)
-    data_M = data.max(axis=(1,2), keepdims=True)
-    data = (data - data_m) / (data_M - data_m)
-    
-    return data, labels
-
-def get_train_val_splits(data, labels):
-    
-    
-    idxs = list(range(len(labels)))
-    random.shuffle(idxs)
-    
-    n_train = int(0.8 * len(idxs))
-    train_i = idxs[:n_train]
-    val_i = idxs[n_train:]
-    
-    return data[train_i], labels[train_i], data[val_i], labels[val_i]
+  label = tf.cast(features['label'], tf.int32)
+  return spec, label
 
 def train(args):
     network = st_net_v1
     bs = args.batch_size
     n_classes = 1
     
-    data, labels = load_data(args)
-    trainX, trainY, valX, valY = get_train_val_splits(data, labels)
-
-    
+    def input_fn(tfrecord_dir):
+        tfrecord_files = tf.io.gfile.glob(os.path.join(tfrecord_dir, '*.tfrecord'))
+        random.shuffle(tfrecord_files)
+        dataset = tf.data.TFRecordDataset(tfrecord_files)
+        
+        # Map the parser over dataset, and batch results by up to batch_size
+        dataset = dataset.map(parser)
+        dataset = dataset.batch(args.batch_size)
+        dataset = dataset.shuffle(buffer_size=5*args.batch_size)
+        dataset = dataset.repeat()
+        iterator = dataset.make_one_shot_iterator()
+        
+        features, labels = iterator.get_next()
+        
+        return features, labels
     
     ############### END OF SETUP
     
@@ -167,21 +153,11 @@ def train(args):
     
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
-    train_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={'spectrograms': trainX}, y=trainY,
-        batch_size=bs, num_epochs=args.eval_period, shuffle=True)
+    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.num_epochs*args.batch_size)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=args.eval_period*args.batch_size)
     
-    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={'spectrograms': valX}, y=valY,
-        batch_size=bs, shuffle=False)
-        
-    
-    for i in range(args.num_epochs // args.eval_period):
-        model.train(train_input_fn)
+    tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
 
-        e = model.evaluate(eval_input_fn, name='eval')
-        
-        tf.logging.info("{:06d}: Validation Accuracy: {:.4f}".format(i*args.eval_period, e['accuracy']))
 
 def main():
     parser = argparse.ArgumentParser(
@@ -191,11 +167,11 @@ def main():
                       help='Full path of where to output the results of training.')
     
     parser.add_argument(
-        '--positive_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/alexa_8khz/*/*.wav',
-        help='Where to find the audio data files (default: %(default)s)')
+        '--train_data_root', type=str, default='/scratch0/ilya/locDoc/data/alexa/v2/train/',
+        help='Where to find the tfrecord files (default: %(default)s)')
     parser.add_argument(
-        '--negative_data_glob', type=str, default='/scratch0/ilya/locDoc/data/alexa/v1/libri_3s/dev-clean/*/*/*.wav',
-        help='Where to find the audio data files (default: %(default)s)')
+        '--val_data_root', type=str, default='/scratch0/ilya/locDoc/data/alexa/v2/val/',
+        help='Where to find the tfrecord files (default: %(default)s)')
     # Hyperparams
     parser.add_argument(
         '--lr', type=float, default=1e-4,

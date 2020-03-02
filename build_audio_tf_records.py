@@ -8,10 +8,12 @@ from itertools import product
 import io
 import os
 import random
+import time
 from multiprocessing.pool import Pool
 from multiprocessing import Lock, Value
 
 import numpy as np
+import librosa.core
 import librosa.effects
 from pydub import AudioSegment
 from pyrubberband import pyrb
@@ -20,7 +22,11 @@ from tqdm import tqdm
 
 import tensorflow as tf
 
+from util.ft import next_power_of_2, closest_power_of_2
+
 import pdb
+
+AUDIO_OUTPUT_LEN = 32768 # 2s, power of 2
 
 sr = 16000
 time_stretch_opts = np.arange(0.8,1.25,.05).tolist()
@@ -30,6 +36,12 @@ c_advance_opts = np.arange(0, sr//4, sr//20, dtype=int).tolist()
 output_advance_opts = np.arange(sr//10, sr, sr//10, dtype=int).tolist()
 loudness_opts = [0.25,0.5,1.0]
 augment_opts = list(product(*[time_stretch_opts, pitch_shift_opts, b_advance_opts, c_advance_opts, output_advance_opts, loudness_opts]))
+
+b_advance_opts = np.arange(0, sr//2, sr//20, dtype=int).tolist()
+output_advance_opts = np.arange(sr//10, sr, sr//10, dtype=int).tolist()
+loudness_opts = [0.25,0.5,1.0,1.25, 1.5]
+negative_augment_opts = list(product(*[b_advance_opts, output_advance_opts, loudness_opts]))
+
 
 parser = argparse.ArgumentParser()
 
@@ -78,10 +90,16 @@ def serialize_example(samples, label, sample_id=None):
 
     if sample_id is not None:
         feature['id'] = _int64_feature(sample_id)
-
-    # feature['samples'] = _int64_feature(
-    #     samples)
-
+    
+    assert len(samples) == AUDIO_OUTPUT_LEN, 'Audio is length %i expected %i' % (len(samples), AUDIO_OUTPUT_LEN)
+    spec = np.abs(librosa.core.stft(samples,
+        win_length=closest_power_of_2(sr//50),
+        hop_length=closest_power_of_2(sr // 100),
+        n_fft=2*closest_power_of_2(sr//50)))
+    spec = spec[:256,:256]
+    
+    feature['spectrogram_shape'] = tf.train.Feature(int64_list=tf.train.Int64List(value=list(spec.shape)))
+    feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
     audio_segment = AudioSegment(
@@ -128,25 +146,37 @@ def _build_tf_records_from_dataset(p_files, n_files, positive_multiplier, output
 
     os.makedirs(output_dir, exist_ok=True)
 
-    for idx, p_file in enumerate(tqdm(p_files, desc='Samples Processed')):
-        record_writer, next_record, num_examples = _update_record_writer(
-            record_writer=record_writer, next_record=next_record,
-            num_examples=num_examples, output_dir=output_dir,
-            max_per_record=max_per_record, text=text)
-        # with lock:    
-        #     counter.value += 1
-        #     sample_id = counter.value
-
+    if label == 1:
+        for idx, p_file in enumerate(tqdm(p_files, desc='Positive Examples Processed')):
+            augment_settings = random.sample(augment_opts, positive_multiplier)
+            for j in range(positive_multiplier):
+                record_writer, next_record, num_examples = _update_record_writer(
+                    record_writer=record_writer, next_record=next_record,
+                    num_examples=num_examples, output_dir=output_dir,
+                    max_per_record=max_per_record, text=text)
     
-        sample_id = idx + idx_offset
-        augment_settings = random.sample(augment_opts, positive_multiplier)
-        for j in range(positive_multiplier):
-            n_file = n_files[idx*positive_multiplier + j]
-            
-            samples = augment_audio(p_file, n_file, *augment_settings[j])
+                sample_id = idx + idx_offset
+                
+                n_file = n_files[idx*positive_multiplier + j]
+                
+                samples = augment_audio(p_file, n_file, *augment_settings[j])
+    
+                example = serialize_example(samples, label, sample_id=sample_id)
+                record_writer.write(example)
+    else:
+        for idx in tqdm(range(len(n_files)//2), desc='Negative Examples Processed'):
+            augment_setting = random.sample(negative_augment_opts, 1)[0]
+            record_writer, next_record, num_examples = _update_record_writer(
+                record_writer=record_writer, next_record=next_record,
+                num_examples=num_examples, output_dir=output_dir,
+                max_per_record=max_per_record, text=text)
 
+            sample_id = idx + idx_offset
+            
+            samples = mix_two_negatives(n_files[2*idx], n_files[2*idx + 1], *augment_setting)
             example = serialize_example(samples, label, sample_id=sample_id)
             record_writer.write(example)
+            
     
     record_writer.close()
 
@@ -182,20 +212,16 @@ def mix_three(a, b, c, b_advance=320, c_advance=320, output_advance=0, output_le
     out[:actual_len] = abc[s:e]
     return out
 
+def get_chunk(samples, chunk):
+    return np.array(samples[chunk[0]:chunk[1]])
 
 def augment_audio(p_file, n_file, time_stretch, pitch_shifts, b_advance, c_advance, output_advance, loudness):
     sr = 16000
-    output_len = 32000
+    output_len = AUDIO_OUTPUT_LEN
     samples_bg, _ = sf.read(n_file)
-    # split into sentences
-    audio_chunks = librosa.effects.split(samples_bg, top_db=60, frame_length=320, hop_length=160)
-    chunk_lens = [(chunk[1] - chunk[0]) / float(sr) for chunk in audio_chunks]
-    sentence_chunks = [chunk for chunk in audio_chunks if ((chunk[1] - chunk[0]) / float(sr)) > 1.0]
-    def get_chunk(samples, chunk):
-        return np.array(samples[chunk[0]:chunk[1]])
-    if len(sentence_chunks) < 2:
-        sentence_chunks = [[len(samples_bg)//2, len(samples_bg)-1],[0,len(samples_bg)//2]]
-    leading_chunk, trailing_chunk = random.sample(sentence_chunks, 2)
+    
+    samples_bg, _ = librosa.effects.trim(samples_bg, top_db=60)    
+    leading_chunk, trailing_chunk = [[len(samples_bg)//2, len(samples_bg)-1],[0,len(samples_bg)//2]]
     leading = get_chunk(samples_bg, leading_chunk)
     trailing = get_chunk(samples_bg, trailing_chunk)
         
@@ -206,6 +232,29 @@ def augment_audio(p_file, n_file, time_stretch, pitch_shifts, b_advance, c_advan
     k = np.sqrt((trailing**2).sum() / len(trailing)) / np.sqrt((wakeword_pitchaltered_**2).sum() / len(wakeword_pitchaltered_))
     wakeword_pitchaltered_ *= k*loudness
     return mix_three(leading, np.array(wakeword_pitchaltered_), trailing, b_advance=b_advance, c_advance=c_advance, output_advance=output_advance, output_len=output_len)
+    
+def mix_two_negatives(n_file1, n_file2, b_advance, output_advance, loudness):
+    sr = 16000
+    output_len = AUDIO_OUTPUT_LEN
+    a, _ = sf.read(n_file1)
+    b, _ = sf.read(n_file2)
+    
+    a, _ = librosa.effects.trim(a, top_db=40)
+    b, _ = librosa.effects.trim(b, top_db=40)
+    leading_chunk, trailing_chunk = [[len(a)//2, len(a)-1],[0,len(b)//2]]
+    leading = get_chunk(a, leading_chunk)
+    trailing = get_chunk(b, trailing_chunk)
+
+    k = np.sqrt((leading**2).sum() / len(leading)) / np.sqrt((trailing**2).sum() / len(trailing))
+    trailing *= k*loudness
+    mixed = mix_two(leading, trailing, b_advance=b_advance)
+    
+    s = max(len(leading)-b_advance - output_advance, 0)
+    e = s + output_len
+    out = np.zeros(output_len)
+    actual_len = len(mixed)-s
+    out[:actual_len] = mixed[s:e]
+    return out
     
 
 
@@ -221,6 +270,7 @@ def build_dataset_randomized(args, p_files, n_files, path):
     
     Chunked by number threads.
     """
+    global _idx_offset
     lock = Lock()
     counter = Value('i', 0)
 
@@ -243,7 +293,25 @@ def build_dataset_randomized(args, p_files, n_files, path):
                           'idx_offset': _idx_offset
         })
         n_files_pointer += n_chunk_size
+    _idx_offset += len(p_files)*args.positive_multiplier
     
+    for i in range(args.threads):
+        # 50/50 wakeword to not wakeword for now
+        n_chunk_size = 2*len(p_files)*args.positive_multiplier // args.threads
+        
+        args_list.append({'p_files': None,
+                          'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
+                          'positive_multiplier': args.positive_multiplier,
+                          'output_dir': path,
+                          'label': 0,
+                          'max_per_record': args.max_per_record,
+                          'text': '_negative_%.2d' % i,
+                          'idx_offset': _idx_offset
+        })
+        n_files_pointer += n_chunk_size
+    
+    print('Work scheduled, starting now...')
+    start_time = time.time()
 
     if args.threads > 1:
         for _ in pool.imap_unordered(_build_tf_records_from_dataset_wrapper,
@@ -255,6 +323,7 @@ def build_dataset_randomized(args, p_files, n_files, path):
 
     pool.close()
     pool.join()
+    print('Work done, took %.1f min.' % ((time.time() - start_time)/60.0))
 
 def train_val_speaker_separation(data_dir, fglob='*.wav', percentage_train=0.8):
     """
