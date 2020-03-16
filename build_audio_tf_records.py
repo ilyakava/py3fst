@@ -6,8 +6,10 @@ import argparse
 import glob
 from itertools import product
 import io
+import json
 import os
 import random
+import sys
 import time
 from multiprocessing.pool import Pool
 from multiprocessing import Lock, Value
@@ -23,29 +25,34 @@ from tqdm import tqdm
 import tensorflow as tf
 
 from util.ft import next_power_of_2, closest_power_of_2
+from util.log import write_metadata
+from augment_audio import augment_audio, extract_example, augment_audio_two_negatives
 
 import pdb
 
-AUDIO_OUTPUT_LEN = 32768 # 2s, power of 2
+counter = None
+random.seed(2020)
 
 sr = 16000
-time_stretch_opts = np.arange(0.8,1.25,.05).tolist()
 pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
-b_advance_opts = np.arange(0, sr//2, sr//20, dtype=int).tolist()
-c_advance_opts = np.arange(0, sr//4, sr//20, dtype=int).tolist()
-output_advance_opts = np.arange(sr//10, sr, sr//10, dtype=int).tolist()
+silence_1_opts = np.arange(-0.1, 0.2, 0.05).tolist()
+silence_2_opts = np.arange(-0.1, 0.2, 0.05).tolist()
 loudness_opts = [0.25,0.5,1.0]
-augment_opts = list(product(*[time_stretch_opts, pitch_shift_opts, b_advance_opts, c_advance_opts, output_advance_opts, loudness_opts]))
+positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
-b_advance_opts = np.arange(0, sr//2, sr//20, dtype=int).tolist()
-output_advance_opts = np.arange(sr//10, sr, sr//10, dtype=int).tolist()
+lengths_ms = np.arange(0.4,0.9,0.05)
+lengths_probabilities = np.array([ 2,  7, 31, 20, 24, 21, 13,  4,  0])
+lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
+
+negative_silence_opts = np.arange(-0.1, 0.2, 0.05).tolist()
 loudness_opts = [0.25,0.5,1.0,1.25, 1.5]
-negative_augment_opts = list(product(*[b_advance_opts, output_advance_opts, loudness_opts]))
+negative_augment_opts = list(product(*[negative_silence_opts, loudness_opts]))
 
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--positive_data_dir", help="...")
+parser.add_argument("--wakeword_metafile", help="...")
 parser.add_argument("--negative_data_dir", help="...")
 parser.add_argument('--positive_multiplier', default=1, type=int,
                     help='...')
@@ -55,6 +62,12 @@ parser.add_argument("--train_path", help="...")
 parser.add_argument("--val_path", help="...")
 parser.add_argument('--percentage_train', default=0.8, type=float,
                     help='...')
+parser.add_argument('--win_length', default=sr//40, type=int,
+                    help='...')
+parser.add_argument('--hop_length', default=sr//100, type=int,
+                    help='... Becomes the frame size (One frame per this many audio samples).')
+parser.add_argument('--example_length', default=19840, type=int,
+                    help='... Should be a multiple of hop_length')
 
 
 parser.add_argument('--threads', default=8, type=int,
@@ -80,26 +93,31 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 
-def serialize_example(samples, label, sample_id=None):
+def serialize_example(samples, samples_label, win_length, hop_length, example_length, sample_id=None):
     """
     Creates a tf.Example message ready to be written to a file.
     """
     feature = {}
     
-    feature['label'] = _int64_feature(label)
+    feature['label'] = _int64_feature(samples_label.max())
 
     if sample_id is not None:
         feature['id'] = _int64_feature(sample_id)
     
-    assert len(samples) == AUDIO_OUTPUT_LEN, 'Audio is length %i expected %i' % (len(samples), AUDIO_OUTPUT_LEN)
+    assert len(samples) == example_length, 'Length of samples is wrong, expected %i received %i.' % (example_length, len(samples))
+    assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
     spec = np.abs(librosa.core.stft(samples,
-        win_length=closest_power_of_2(sr//50),
-        hop_length=closest_power_of_2(sr // 100),
-        n_fft=2*closest_power_of_2(sr//50)))
-    spec = spec[:256,:256]
+        win_length=win_length,
+        hop_length=hop_length,
+        n_fft=win_length))
+    height = win_length // 2
+    width = example_length // hop_length
+    spec = spec[:height,:width]
     
     feature['spectrogram_shape'] = tf.train.Feature(int64_list=tf.train.Int64List(value=list(spec.shape)))
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
+    # TODO make into spectrogram label (downsample)
+    feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samples_label))
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
     audio_segment = AudioSegment(
@@ -138,8 +156,9 @@ def _update_record_writer(record_writer, next_record, num_examples,
 def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
-def _build_tf_records_from_dataset(p_files, n_files, positive_multiplier, output_dir,
-                                   label, max_per_record, text, idx_offset):
+def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir,
+                                   label, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+    global counter, counter2
     num_examples = 0
     next_record = 0
     record_writer = None
@@ -148,120 +167,83 @@ def _build_tf_records_from_dataset(p_files, n_files, positive_multiplier, output
 
     if label == 1:
         for idx, p_file in enumerate(tqdm(p_files, desc='Positive Examples Processed')):
-            augment_settings = random.sample(augment_opts, positive_multiplier)
+            p_start_end = p_start_ends[idx]
+            augment_settings = random.sample(positive_augment_opts, positive_multiplier)
             for j in range(positive_multiplier):
+                # sample_id = idx + idx_offset
+                
+                n_file = n_files[idx*positive_multiplier + j]
+                
+                rand_p_duration = lengths_ms[np.random.multinomial(1, lengths_probabilities).tolist().index(1)]
+                
+                try:
+                    output, labs = augment_audio(p_file, p_start_end, n_file, rand_p_duration, *augment_settings[j])
+                except:
+                    print("Error augmenting inputs %s, %s:" % (p_file, n_file))
+                    print(sys.exc_info()[0])
+                    continue
+                
+                mix = output.mean(axis=1)
+                
+                # TODO abstract away this option too, which is num segments to extract from a single mix
+                # TODO when the wakeword is delayed/advanced advanced too much, output examples with label 0?
+                for k, advance in enumerate((np.arange(0.05,rand_p_duration-0.05,0.01) * sr).astype(int).tolist()):
+                        samples = extract_example(mix, labs[1,1]-advance, example_length=example_length)
+                        
+                        mix_labs = np.zeros(mix.shape, dtype=int)
+                        mix_labs[labs[0,1]:labs[1,1]] = 1
+                        samples_labs = extract_example(mix_labs, labs[1,1]-advance, example_length=example_length)
+            
+                        example = serialize_example(samples, samples_labs, win_length, hop_length, example_length)
+                        
+                        record_writer, next_record, num_examples = _update_record_writer(
+                            record_writer=record_writer, next_record=next_record,
+                            num_examples=num_examples, output_dir=output_dir,
+                            max_per_record=max_per_record, text=text)
+                        record_writer.write(example)
+                        with counter.get_lock():
+                            counter.value += 1
+                        
+
+
+    else:
+        for idx in tqdm(range(len(n_files)//2), desc='Negative Examples Processed'):
+            augment_setting = random.sample(negative_augment_opts, 1)[0]
+            rand_p_duration = lengths_ms[np.random.multinomial(1, lengths_probabilities).tolist().index(1)]
+
+            try:
+                output, labs = augment_audio_two_negatives(n_files[2*idx], n_files[2*idx + 1], example_length, *augment_setting)
+            except:
+                print("Error augmenting inputs %s, %s:" % (n_files[2*idx], n_files[2*idx + 1]))
+                print(sys.exc_info()[0])
+                continue
+            
+            mix = output.mean(axis=1)
+            # sample_id = idx + idx_offset
+            # do the same kind of multiplying in negative set for balance
+            for k, advance in enumerate((np.arange(0.05,rand_p_duration-0.05,0.01) * sr).astype(int).tolist()):
+                samples = extract_example(mix, labs[1,0]+int(0.45*sr)-advance, example_length=example_length)
+                
+                samples_labs = np.zeros(samples.shape, dtype=int)
+                example = serialize_example(samples, samples_labs, win_length, hop_length, example_length)
+                
                 record_writer, next_record, num_examples = _update_record_writer(
                     record_writer=record_writer, next_record=next_record,
                     num_examples=num_examples, output_dir=output_dir,
                     max_per_record=max_per_record, text=text)
-    
-                sample_id = idx + idx_offset
-                
-                n_file = n_files[idx*positive_multiplier + j]
-                
-                samples = augment_audio(p_file, n_file, *augment_settings[j])
-    
-                example = serialize_example(samples, label, sample_id=sample_id)
                 record_writer.write(example)
-    else:
-        for idx in tqdm(range(len(n_files)//2), desc='Negative Examples Processed'):
-            augment_setting = random.sample(negative_augment_opts, 1)[0]
-            record_writer, next_record, num_examples = _update_record_writer(
-                record_writer=record_writer, next_record=next_record,
-                num_examples=num_examples, output_dir=output_dir,
-                max_per_record=max_per_record, text=text)
-
-            sample_id = idx + idx_offset
-            
-            samples = mix_two_negatives(n_files[2*idx], n_files[2*idx + 1], *augment_setting)
-            example = serialize_example(samples, label, sample_id=sample_id)
-            record_writer.write(example)
+                with counter.get_lock():
+                    counter2.value += 1
             
     
     record_writer.close()
 
-def mix_two(a_,b, b_advance=0):
-    a = np.copy(a_)
-    if len(b) <= b_advance:
-        a[-b_advance:(len(b)-b_advance)] += b
-        return a
-    else:
-        if b_advance > 0:
-            a[-b_advance:] += b[:b_advance]
-            return np.concatenate([a, b[b_advance:]], axis=0)
-        else:
-            return np.concatenate([a, b], axis=0)
-    
 
-def mix_three(a, b, c, b_advance=320, c_advance=320, output_advance=0, output_len=32000):
-    """
-     b_advance
-          <---
-         ^ default output start is whenever B starts
-    |---A-----|---B---|----C-----|
-                   <--
-             c_advance^
-    output_advance advances the default output start.
-    """
-    ab = mix_two(a,b,b_advance)
-    abc = mix_two(ab,c,c_advance)
-    s = max(len(a)-b_advance - output_advance, 0)
-    e = s + output_len
-    out = np.zeros(output_len)
-    actual_len = len(abc)-s
-    out[:actual_len] = abc[s:e]
-    return out
-
-def get_chunk(samples, chunk):
-    return np.array(samples[chunk[0]:chunk[1]])
-
-def augment_audio(p_file, n_file, time_stretch, pitch_shifts, b_advance, c_advance, output_advance, loudness):
-    sr = 16000
-    output_len = AUDIO_OUTPUT_LEN
-    samples_bg, _ = sf.read(n_file)
-    
-    samples_bg, _ = librosa.effects.trim(samples_bg, top_db=60)    
-    leading_chunk, trailing_chunk = [[len(samples_bg)//2, len(samples_bg)-1],[0,len(samples_bg)//2]]
-    leading = get_chunk(samples_bg, leading_chunk)
-    trailing = get_chunk(samples_bg, trailing_chunk)
-        
-    wakeword, _ = sf.read(p_file)
-    wakeword_timealtered = pyrb.time_stretch(wakeword, sr=sr, rate=time_stretch)
-    wakeword_pitchaltered = pyrb.pitch_shift(wakeword_timealtered, sr=sr, n_steps=pitch_shifts)
-    wakeword_pitchaltered_, _ = librosa.effects.trim(wakeword_pitchaltered, top_db=30)
-    k = np.sqrt((trailing**2).sum() / len(trailing)) / np.sqrt((wakeword_pitchaltered_**2).sum() / len(wakeword_pitchaltered_))
-    wakeword_pitchaltered_ *= k*loudness
-    return mix_three(leading, np.array(wakeword_pitchaltered_), trailing, b_advance=b_advance, c_advance=c_advance, output_advance=output_advance, output_len=output_len)
-    
-def mix_two_negatives(n_file1, n_file2, b_advance, output_advance, loudness):
-    sr = 16000
-    output_len = AUDIO_OUTPUT_LEN
-    a, _ = sf.read(n_file1)
-    b, _ = sf.read(n_file2)
-    
-    a, _ = librosa.effects.trim(a, top_db=40)
-    b, _ = librosa.effects.trim(b, top_db=40)
-    leading_chunk, trailing_chunk = [[len(a)//2, len(a)-1],[0,len(b)//2]]
-    leading = get_chunk(a, leading_chunk)
-    trailing = get_chunk(b, trailing_chunk)
-
-    k = np.sqrt((leading**2).sum() / len(leading)) / np.sqrt((trailing**2).sum() / len(trailing))
-    trailing *= k*loudness
-    mixed = mix_two(leading, trailing, b_advance=b_advance)
-    
-    s = max(len(leading)-b_advance - output_advance, 0)
-    e = s + output_len
-    out = np.zeros(output_len)
-    actual_len = len(mixed)-s
-    out[:actual_len] = mixed[s:e]
-    return out
-    
-
-
-def _init_pool(l, c):
-    global lock, counter
+def _init_pool(l, c, c2):
+    global lock, counter, counter2
     lock = l
     counter = c
+    counter2 = c2
     
 _idx_offset = 0
 
@@ -273,24 +255,34 @@ def build_dataset_randomized(args, p_files, n_files, path):
     global _idx_offset
     lock = Lock()
     counter = Value('i', 0)
+    counter2 = Value('i', 0)
+    
+    with open(args.wakeword_metafile) as json_file:
+        metadata = json.load(json_file)
 
-    pool = Pool(initializer=_init_pool, initargs=(lock, counter),
+    pool = Pool(initializer=_init_pool, initargs=(lock, counter, counter2),
                 processes=args.threads)
     args_list = []
     p_chunk_size = len(p_files) // args.threads
     n_files_pointer = 0
     for i in range(args.threads):
         p_files_chunk = p_files[i*p_chunk_size:((i+1)*p_chunk_size)]
+        p_files_chunk_ = [os.path.join(*fname.split('/')[-2:]) for fname in p_files_chunk]
+        p_start_ends = [metadata[fname] for fname in p_files_chunk_]
         n_chunk_size = len(p_files_chunk)*args.positive_multiplier
         
         args_list.append({'p_files': p_files_chunk,
+                          'p_start_ends': p_start_ends,
                           'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
                           'positive_multiplier': args.positive_multiplier,
                           'output_dir': path,
                           'label': 1,
                           'max_per_record': args.max_per_record,
                           'text': '_positive_%.2d' % i,
-                          'idx_offset': _idx_offset
+                          'idx_offset': _idx_offset,
+                          'win_length': args.win_length,
+                          'hop_length': args.hop_length,
+                          'example_length': args.example_length
         })
         n_files_pointer += n_chunk_size
     _idx_offset += len(p_files)*args.positive_multiplier
@@ -300,13 +292,17 @@ def build_dataset_randomized(args, p_files, n_files, path):
         n_chunk_size = 2*len(p_files)*args.positive_multiplier // args.threads
         
         args_list.append({'p_files': None,
+                          'p_start_ends': None,
                           'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
                           'positive_multiplier': args.positive_multiplier,
                           'output_dir': path,
                           'label': 0,
                           'max_per_record': args.max_per_record,
                           'text': '_negative_%.2d' % i,
-                          'idx_offset': _idx_offset
+                          'idx_offset': _idx_offset,
+                          'win_length': args.win_length,
+                          'hop_length': args.hop_length,
+                          'example_length': args.example_length
         })
         n_files_pointer += n_chunk_size
     
@@ -324,6 +320,8 @@ def build_dataset_randomized(args, p_files, n_files, path):
     pool.close()
     pool.join()
     print('Work done, took %.1f min.' % ((time.time() - start_time)/60.0))
+    print('Made %i positive spectrograms.' % counter.value)
+    print('Made %i negative spectrograms.' % counter2.value)
 
 def train_val_speaker_separation(data_dir, fglob='*.wav', percentage_train=0.8):
     """
@@ -348,12 +346,47 @@ def train_val_speaker_separation(data_dir, fglob='*.wav', percentage_train=0.8):
     p_val_files = [item for sublist in p_val_files for item in sublist]
 
     return p_train_files, p_val_files
+    
+def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
+    """
+    Returns:
+        shuffled train paths, shuffled val paths
+    """
+    with open(args.wakeword_metafile) as json_file:
+        metadata = json.load(json_file)
+    source_files = list(metadata.keys())
+
+    # dir per speaker
+    dirs = np.array(list(set([path.split('/')[0] for path in source_files])))
+    idxs = list(range(len(dirs)))
+    random.shuffle(idxs)
+    
+    n_train = int(percentage_train * len(idxs))
+    train_dirs = dirs[idxs[:n_train]]
+    val_dirs = dirs[idxs[n_train:]]
+    
+    train_files = []
+    val_files = []
+    
+    for path in source_files:
+        speaker = path.split('/')[0]
+        full_path = os.path.join(args.positive_data_dir, path)
+        if speaker in train_dirs:
+            train_files.append(full_path)
+        elif speaker in val_dirs:
+            val_files.append(full_path)
+        else:
+            raise ValueError("%s is neither in train nor val set" % path)
+
+    return train_files, val_files
 
 if __name__ == '__main__':
     args = parser.parse_args()
 
+    write_metadata(args.train_path, args)
+
     n_train_files, n_val_files = train_val_speaker_separation(args.negative_data_dir, fglob='*/*.flac', percentage_train=args.percentage_train)
-    p_train_files, p_val_files = train_val_speaker_separation(args.positive_data_dir, fglob='*.wav', percentage_train=args.percentage_train)
+    p_train_files, p_val_files = train_val_speaker_separation_wakeword_metafile(args, percentage_train=args.percentage_train)
     
     assert len(p_train_files) * args.positive_multiplier < len(n_train_files), 'Not enough negative examples'
     assert len(p_val_files) * args.positive_multiplier < len(n_val_files), 'Not enough negative examples'
