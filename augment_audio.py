@@ -55,7 +55,7 @@ def pad_clip(clip, padding=(0,0)):
     y = np.pad(clip.samples, pad_width=padding, mode='constant', constant_values=0)
     return Clip(y, clip.start+pad_left, clip.end+pad_left)
 
-def extract_other_speech_padding(samples_bg, length=48000):
+def extract_other_speech_padding(samples_bg, length=80000):
     """
     Returns:
       leading Clip and trailing Clip

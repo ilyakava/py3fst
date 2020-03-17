@@ -7,7 +7,7 @@ import logging
 import os
 import random
 
-random.seed(2020)
+# random.seed(2020)
 
 import argparse
 import numpy as np
@@ -17,11 +17,15 @@ from audio_load import load_audio_from_files, audio2spec
 from st_2d import scat2d
 import windows as win
 
+from networks.highway import highway_block
+
 import pdb
 
 layerO = namedtuple('layerO', ['strides', 'padding'])
 
-def st_net_v1(x, dropout, reuse, is_training, n_classes):
+sr = 16000
+
+def st_net_v1(x, dropout, reuse, is_training, n_classes, args):
     """Network to follow ST preprocessing.
     
     x should be (...)
@@ -32,10 +36,13 @@ def st_net_v1(x, dropout, reuse, is_training, n_classes):
     
     layer_params = layerO((1,1), 'valid')
     nfeat = 32
+
+    spec_h = args.win_length // 2
+    spec_w = args.network_example_length // args.hop_length
     
     with tf.variable_scope('wst_net_v1', reuse=reuse):
         # x = x_dict['spectrograms']
-        x = tf.reshape(x, (-1,256,256))
+        x = tf.reshape(x, (-1,spec_h,spec_w))
         x = tf.expand_dims(x, -1)
 
         ### bs, h, w, channels
@@ -70,33 +77,86 @@ def st_net_v1(x, dropout, reuse, is_training, n_classes):
         out = tf.layers.dense(fc, n_classes)
     return tf.squeeze(out, axis=1)
 
-def parser(serialized_example):
-  """Parses a single tf.Example into x,y tensors."""
-  features = tf.parse_single_example(
-      serialized_example,
-      features={
-          'spectrogram': tf.FixedLenFeature([256*256], tf.float32),
-          'label': tf.FixedLenFeature([], tf.int64),
-      })
-  spec = features['spectrogram']
+def amazon_net(x, dropout, reuse, is_training, n_classes, args):
+    spec_h = args.win_length // 2 # freq
+    spec_w = args.network_example_length // args.hop_length # time
 
-  label = tf.cast(features['label'], tf.int32)
-  return spec, label
+    nfeat = 32
+    hidden_units = spec_h
+    bottleneck_size = hidden_units // 2
+
+    context_chunks = 31
+    context_chunk_size = spec_w // context_chunks
+    
+    with tf.variable_scope('amazon_net', reuse=reuse):
+        # x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        out = tf.transpose(x, [0,2,1]) # batch, time, depth
+
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        out = tf.transpose(out, [0,2,1]) # [-1, C, t]
+        out = tf.reshape(out, [-1, bottleneck_size*2, spec_w // 2])
+        out = tf.transpose(out, [0,2,1]) # [-1,t,C]
+
+        for i in range(6):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_classifier_{}'.format(i))
+
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        out = tf.squeeze(out, axis=-1)
+        out = tf.layers.dense(out, n_classes)
+    return tf.squeeze(out, axis=1)
 
 def train(args):
-    network = st_net_v1
+    network = amazon_net
     bs = args.batch_size
     n_classes = 1
     
     def input_fn(tfrecord_dir):
+        """
+        This function is called once for every example for every epoch, so
+        data augmentation that happens randomly will be different every
+        time.
+
+        More info:
+            https://www.tensorflow.org/api_docs/python/tf/data/TFRecordDataset
+        """
         tfrecord_files = tf.io.gfile.glob(os.path.join(tfrecord_dir, '*.tfrecord'))
         random.shuffle(tfrecord_files)
         dataset = tf.data.TFRecordDataset(tfrecord_files)
+        spec_h = args.win_length // 2
+        spec_w = args.tfrecord_example_length // args.hop_length
+
+        def parser(serialized_example):
+            """Parses a single tf.Example into x,y tensors.
+            """
+            features = tf.parse_single_example(
+              serialized_example,
+              features={
+                  'spectrogram': tf.FixedLenFeature([spec_h * spec_w], tf.float32),
+                  'spectrogram_label': tf.FixedLenFeature([spec_w], tf.int64),
+              })
+            spec = features['spectrogram']
+            label = tf.cast(features['spectrogram_label'], tf.int32)
+            spec = tf.reshape(spec, (spec_h, spec_w))
+            # both of these need to be trimmed
+            spec_cut_w = args.network_example_length // args.hop_length
+            si = random.randint(0, spec_w - spec_cut_w - 1)
+            ei = si + spec_cut_w
+            
+            return spec[:,si:ei], label[si + int(2*spec_cut_w/3.0)]
         
         # Map the parser over dataset, and batch results by up to batch_size
         dataset = dataset.map(parser)
         dataset = dataset.batch(args.batch_size)
-        dataset = dataset.shuffle(buffer_size=5*args.batch_size)
+        dataset = dataset.prefetch(buffer_size=8*args.batch_size)
+        dataset = dataset.shuffle(buffer_size=4*args.batch_size)
         dataset = dataset.repeat()
         iterator = dataset.make_one_shot_iterator()
         
@@ -114,9 +174,9 @@ def train(args):
         # Because Dropout have different behavior at training and prediction time, we
         # need to create 2 distinct computation graphs that still share the same weights.
         logits_train = network(features, args.dropout, reuse=False,
-                                is_training=True, n_classes=n_classes)
+                                is_training=True, n_classes=n_classes, args=args)
         logits_val = network(features, args.dropout, reuse=True,
-                                is_training=False, n_classes=n_classes)
+                                is_training=False, n_classes=n_classes, args=args)
     
         # Predictions
         pred_classes = logits_val > 0.5
@@ -154,7 +214,7 @@ def train(args):
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.num_epochs*args.batch_size)
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=args.eval_period*args.batch_size)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=args.eval_period)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
 
@@ -165,13 +225,23 @@ def main():
         
     parser.add_argument('--model_root', required=True,
                       help='Full path of where to output the results of training.')
-    
+    # Data
     parser.add_argument(
-        '--train_data_root', type=str, default='/scratch0/ilya/locDoc/data/alexa/v2/train/',
+        '--train_data_root', type=str, required=True,
         help='Where to find the tfrecord files (default: %(default)s)')
     parser.add_argument(
-        '--val_data_root', type=str, default='/scratch0/ilya/locDoc/data/alexa/v2/val/',
+        '--val_data_root', type=str, required=True,
         help='Where to find the tfrecord files (default: %(default)s)')
+    parser.add_argument('--win_length', default=sr//40, type=int,
+                    help='...')
+    parser.add_argument('--hop_length', default=sr//100, type=int,
+                        help='... Becomes the frame size (One frame per this many audio samples).')
+    parser.add_argument('--tfrecord_example_length', default=80000, type=int,
+                        help='This is the number of samples in the examples in the tf.record. It should be a multiple of hop_length.')
+    parser.add_argument('--network_example_length', default=19840, type=int,
+        help='This is the number of samples that should be used when input' + \
+        ' into the network. It should be a multiple of hop_length.' + \
+        ' Length / hop_length = num contexts * context chunk size')
     # Hyperparams
     parser.add_argument(
         '--lr', type=float, default=1e-4,
@@ -187,8 +257,8 @@ def main():
         '--num_epochs', type=int, default=10000,
         help='Number of epochs to run training for.')
     parser.add_argument(
-        '--eval_period', type=int, default=2,
-        help='Eval after every N epochs.')
+        '--eval_period', type=int, default=5000,
+        help='Eval after every N itrs.')
                       
                       
     args = parser.parse_args()

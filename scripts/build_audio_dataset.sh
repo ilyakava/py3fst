@@ -2,8 +2,9 @@
 
 python build_audio_tf_records.py \
 --positive_data_dir '/scratch0/ilya/locDoc/data/alexa/v1/alexa' \
---negative_data_dir '/scratch1/ilya/locDoc/data/LibriSpeech/train-clean-100' \
---train_path '/scratch0/ilya/locDoc/data/alexa/v2/train' \
---val_path '/scratch0/ilya/locDoc/data/alexa/v2/val' \
---positive_multiplier 1 \
---threads 1
+--wakeword_metafile '/cfarhomes/ilyak/ilyakavalerov@gmail.com/ramawks69/pyfst/data/alexa.annotated.frank+ilya.json' \
+--negative_data_dir '/scratch1/ilya/locDoc/data/LibriSpeech/train-clean-360' \
+--train_path '/scratch1/ilya/locDoc/data/alexa/v4b/train' \
+--val_path '/scratch1/ilya/locDoc/data/alexa/v4b/val' \
+--positive_multiplier 40 \
+--threads 8
