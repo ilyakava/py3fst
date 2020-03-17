@@ -100,18 +100,17 @@ def amazon_net(x, dropout, reuse, is_training, n_classes, args):
         out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
 
         # context window
-        out = tf.transpose(out, [0,2,1]) # [-1, C, t]
-        out = tf.reshape(out, [-1, bottleneck_size*2, spec_w // 2])
-        out = tf.transpose(out, [0,2,1]) # [-1,t,C]
+        # [-1, t, C]
+        out = tf.reshape(out, [-1, spec_w // 2, bottleneck_size*2])
 
         for i in range(6):
             out = highway_block(out, num_units=hidden_units, scope='highwaynet_classifier_{}'.format(i))
 
         # get classification
         out = tf.layers.dense(out, n_classes)
-        out = tf.squeeze(out, axis=-1)
-        out = tf.layers.dense(out, n_classes)
-    return tf.squeeze(out, axis=1)
+        out = tf.squeeze(out, axis=-1) # [-1, t//2]
+
+    return out
 
 def train(args):
     network = amazon_net
@@ -150,7 +149,8 @@ def train(args):
             si = random.randint(0, spec_w - spec_cut_w - 1)
             ei = si + spec_cut_w
             
-            return spec[:,si:ei], label[si + int(2*spec_cut_w/3.0)]
+            # downsample by 2 here b/c that's what happens in the network
+            return spec[:,si:ei], label[si:ei:2]
         
         # Map the parser over dataset, and batch results by up to batch_size
         dataset = dataset.map(parser)
@@ -179,14 +179,14 @@ def train(args):
                                 is_training=False, n_classes=n_classes, args=args)
     
         # Predictions
-        pred_classes = logits_val > 0.5
         pred_probas = tf.nn.softmax(logits_val)
+        pred_classes = pred_probas > 0.5
     
         # If prediction mode, early return
         if mode == tf.estimator.ModeKeys.PREDICT:
             return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
     
-            # Define loss and optimizer
+        # Define loss and optimizer
         loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
             logits=logits_train, labels=tf.cast(labels, dtype=tf.float32)))
         optimizer = tf.train.AdamOptimizer(learning_rate=args.lr)
@@ -195,9 +195,30 @@ def train(args):
     
         # Evaluate the accuracy of the model
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-    
-        # tf.summary.scalar('min', loss_op)
-    
+        
+        # show masks that are being made
+        def get_image_summary(ts_lab):
+            img_h = 5
+            img_w = args.network_example_length // args.hop_length
+            # repeat twice
+            ts_lab_rep2 = tf.tile(tf.expand_dims(ts_lab, -1),(1,1,2))
+            ts_lab_rep2 = tf.reshape(ts_lab_rep2, [-1, img_w])
+            imgs = tf.tile(tf.expand_dims(ts_lab_rep2,-1), (1,1,img_h))
+            imgs = tf.transpose(imgs, [0,2,1])
+            imgs = tf.expand_dims(imgs, -1)
+            return imgs
+        
+        img_hat = get_image_summary(pred_probas)
+        spec_h = args.win_length // 4 # cut higher half frequencies
+        log_specs = tf.log(features)
+        bm = tf.reduce_min(log_specs, (1,2), keepdims=True)
+        bM = tf.reduce_max(log_specs, (1,2), keepdims=True)
+        img_specs = (log_specs - bm) / (bM - bm)
+        img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
+        img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
+        img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
+        tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
+        
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
         estim_specs = tf.estimator.EstimatorSpec(
@@ -214,7 +235,7 @@ def train(args):
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.num_epochs*args.batch_size)
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=args.eval_period)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=20)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
 
@@ -254,7 +275,7 @@ def main():
         help='Dropout rate.')
     # Other
     parser.add_argument(
-        '--num_epochs', type=int, default=10000,
+        '--num_epochs', type=int, default=100000,
         help='Number of epochs to run training for.')
     parser.add_argument(
         '--eval_period', type=int, default=5000,
