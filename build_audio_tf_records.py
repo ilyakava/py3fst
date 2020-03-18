@@ -39,11 +39,11 @@ sr = 16000
 pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
 silence_1_opts = np.arange(-0.1, 0.2, 0.05).tolist()
 silence_2_opts = np.arange(-0.1, 0.2, 0.05).tolist()
-loudness_opts = [0.25,0.5,1.0]
+loudness_opts = [0.75,1.0,1.25]
 positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
 lengths_ms = np.arange(0.4,0.9,0.05)
-lengths_probabilities = np.array([ 2,  7, 31, 20, 24, 21, 13,  4,  0])
+lengths_probabilities = np.array([ 11, 26, 56, 45, 43, 33, 21, 7,  1])
 lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
 
 
@@ -55,8 +55,8 @@ parser.add_argument("--wakeword_metafile", help="...")
 parser.add_argument("--negative_data_dir", help="...")
 parser.add_argument('--positive_multiplier', default=1, type=int,
                     help='...')
-parser.add_argument('--max_per_record', default=1000, type=int,
-                    help='...')
+parser.add_argument('--max_per_record', default=200, type=int,
+                    help='Should be set such that each tfrecord file is ~100MB.')
 parser.add_argument("--train_path", help="...")
 parser.add_argument("--val_path", help="...")
 parser.add_argument('--percentage_train', default=0.8, type=float,
