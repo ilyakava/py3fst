@@ -37,7 +37,7 @@ def st_net_v1(x, dropout, reuse, is_training, n_classes, args):
     layer_params = layerO((1,1), 'valid')
     nfeat = 32
 
-    spec_h = args.win_length // 2
+    spec_h = args.feature_height
     spec_w = args.network_example_length // args.hop_length
     
     with tf.variable_scope('wst_net_v1', reuse=reuse):
@@ -78,11 +78,10 @@ def st_net_v1(x, dropout, reuse, is_training, n_classes, args):
     return tf.squeeze(out, axis=1)
 
 def amazon_net(x, dropout, reuse, is_training, n_classes, args):
-    spec_h = args.win_length // 2 # freq
+    spec_h = args.feature_height # ~freq
     spec_w = args.network_example_length // args.hop_length # time
 
-    nfeat = 32
-    hidden_units = spec_h
+    hidden_units = 64
     bottleneck_size = hidden_units // 2
 
     context_chunks = 31
@@ -93,6 +92,12 @@ def amazon_net(x, dropout, reuse, is_training, n_classes, args):
         x = tf.reshape(x, (-1,spec_h,spec_w))
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
+        # prenet
+        out = tf.layers.dense(out, units=hidden_units*2, activation=tf.nn.relu)
+        out = tf.layers.dropout(out, rate=dropout, training=is_training)
+        out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
+        out = tf.layers.dropout(out, rate=dropout, training=is_training)
+        
         for i in range(4):
             out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
 
@@ -129,7 +134,7 @@ def train(args):
         tfrecord_files = tf.io.gfile.glob(os.path.join(tfrecord_dir, '*.tfrecord'))
         random.shuffle(tfrecord_files)
         dataset = tf.data.TFRecordDataset(tfrecord_files)
-        spec_h = args.win_length // 2
+        spec_h = args.feature_height
         spec_w = args.tfrecord_example_length // args.hop_length
 
         def parser(serialized_example):
@@ -179,7 +184,7 @@ def train(args):
                                 is_training=False, n_classes=n_classes, args=args)
     
         # Predictions
-        pred_probas = tf.nn.softmax(logits_val)
+        pred_probas = tf.math.sigmoid(logits_val)
         pred_classes = pred_probas > 0.5
     
         # If prediction mode, early return
@@ -188,13 +193,35 @@ def train(args):
     
         # Define loss and optimizer
         loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-            logits=logits_train, labels=tf.cast(labels, dtype=tf.float32)))
+            logits=tf.reshape(logits_train, [-1]), labels=tf.cast(tf.reshape(labels, [-1]), dtype=tf.float32)))
         optimizer = tf.train.AdamOptimizer(learning_rate=args.lr)
         train_op = optimizer.minimize(loss_op,
                                       global_step=tf.train.get_global_step())
     
         # Evaluate the accuracy of the model
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
+        
+        # smooth the time-series prediction
+        alpha = 0.1
+        N = 30 #int((sr * 0.6) // args.hop_length // 2)
+        exp_filt = alpha*((1-alpha)**np.arange(0,N))
+        exp_filt[-1] /= alpha
+        exp_filt = exp_filt.reshape((N,1))
+        
+        smoothed_logits = tf.layers.conv1d(
+            tf.expand_dims(logits_val,-1),
+            1,
+            N,
+            strides=(1),
+            padding='same',
+            dilation_rate=(1),
+            activation=None,
+            use_bias=False,
+            kernel_initializer=tf.constant_initializer(exp_filt, dtype=tf.float32),
+            trainable=False,
+            name=None
+        )
+        smoothed_pred_probas = tf.squeeze(tf.math.sigmoid(smoothed_logits), -1)
         
         # show masks that are being made
         def get_image_summary(ts_lab):
@@ -208,16 +235,28 @@ def train(args):
             imgs = tf.expand_dims(imgs, -1)
             return imgs
         
+        # image-ify the features
         img_hat = get_image_summary(pred_probas)
-        spec_h = args.win_length // 4 # cut higher half frequencies
-        log_specs = tf.log(features)
+        img_hat_smoothed = get_image_summary(smoothed_pred_probas)
+        spec_h = args.feature_height # could cut off higher half frequencies here
+        # log_specs = tf.log(features)
+        log_specs = features
         bm = tf.reduce_min(log_specs, (1,2), keepdims=True)
         bM = tf.reduce_max(log_specs, (1,2), keepdims=True)
         img_specs = (log_specs - bm) / (bM - bm)
         img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
         img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
-        img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
+        img_compare = tf.concat([img_hat, img_hat_smoothed, img_gt, img_specs], axis=1)
         tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
+        
+        myevalops = {'accuracy': acc_op}
+        # reduce across time
+        clip_probas = tf.reduce_max(smoothed_pred_probas, axis=1)
+        # clip_probas = tf.clip_by_value(clip_probas, 0, 1)
+        clip_gt = tf.reduce_max(labels, axis=1)
+        threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
+        for sensitivity in threshes:
+            myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
         
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
@@ -226,7 +265,7 @@ def train(args):
             predictions=pred_classes,
             loss=loss_op,
             train_op=train_op,
-            eval_metric_ops={'accuracy': acc_op})
+            eval_metric_ops=myevalops)
     
         return estim_specs
     
@@ -234,10 +273,13 @@ def train(args):
     
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
-    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.num_epochs*args.batch_size)
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=20)
+    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.max_steps)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=45)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
+    
+    # 45 steps at example length is 1 hour
+    # model.evaluate(input_fn = lambda: input_fn(args.val_data_root), steps=45)
 
 
 def main():
@@ -263,19 +305,21 @@ def main():
         help='This is the number of samples that should be used when input' + \
         ' into the network. It should be a multiple of hop_length.' + \
         ' Length / hop_length = num contexts * context chunk size')
+    parser.add_argument('--feature_height', default=80, type=int,
+                    help='...')
     # Hyperparams
     parser.add_argument(
-        '--lr', type=float, default=1e-4,
+        '--lr', type=float, default=3e-4,
         help='Learning rate to use (default: %(default)s)')
     parser.add_argument(
-        '--batch_size', type=int, default=64,
+        '--batch_size', type=int, default=32,
         help='Batch Size')
     parser.add_argument(
-        '--dropout', type=float, default=0.6,
+        '--dropout', type=float, default=0.2,
         help='Dropout rate.')
     # Other
     parser.add_argument(
-        '--num_epochs', type=int, default=100000,
+        '--max_steps', type=int, default=10000000,
         help='Number of epochs to run training for.')
     parser.add_argument(
         '--eval_period', type=int, default=5000,
@@ -283,6 +327,10 @@ def main():
                       
                       
     args = parser.parse_args()
+    
+    # create model dir if needed
+    if not os.path.exists(args.model_root):
+        os.makedirs(args.model_root)
     
     # get TF logger
     log = logging.getLogger('tensorflow')

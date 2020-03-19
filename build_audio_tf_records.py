@@ -15,8 +15,6 @@ from multiprocessing.pool import Pool
 from multiprocessing import Lock, Value
 
 import numpy as np
-import librosa.core
-import librosa.effects
 from pydub import AudioSegment
 from pyrubberband import pyrb
 from scipy.ndimage.filters import maximum_filter1d
@@ -25,9 +23,8 @@ from tqdm import tqdm
 
 import tensorflow as tf
 
-from util.ft import next_power_of_2, closest_power_of_2
 from util.log import write_metadata
-from augment_audio import augment_audio, extract_example, augment_audio_two_negatives
+from augment_audio import augment_audio, extract_example, samples2feature
 
 import pdb
 
@@ -91,7 +88,6 @@ def _int64_feature(value):
     """Returns an int64_list from a bool / enum / int / uint."""
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
-
 def serialize_example(samples, samples_label, win_length, hop_length, example_length, sample_id=None):
     """
     Creates a tf.Example message ready to be written to a file.
@@ -105,13 +101,8 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     
     assert len(samples) == example_length, 'Length of samples is wrong, expected %i received %i.' % (example_length, len(samples))
     assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
-    spec = np.abs(librosa.core.stft(samples,
-        win_length=win_length,
-        hop_length=hop_length,
-        n_fft=win_length))
-    height = win_length // 2
-    width = example_length // hop_length
-    spec = spec[:height,:width]
+    
+    spec = samples2feature(samples, win_length, hop_length)
     
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
     
@@ -220,7 +211,7 @@ def build_dataset_randomized(args, p_files, n_files, path):
     
     Chunked by number threads.
     """
-    global _idx_offset
+    global _idx_offset, counter
     lock = Lock()
     counter = Value('i', 0)
     
