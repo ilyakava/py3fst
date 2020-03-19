@@ -1,5 +1,7 @@
 import math
 
+import numpy as np
+
 def next_power_of_2(x):
     return 1 if x == 0 else 2**math.ceil(math.log2(x))
 def prev_power_of_2(x):
@@ -11,3 +13,24 @@ def closest_power_of_2(x):
         return n
     else:
         return p
+        
+def normalize_0_1(values, M=None, m=None):
+    """deep-voice-conversion
+    """
+    m = m if m is not None else values.min()
+    M = M if M is not None else values.max()
+    normalized = np.clip((values - m) / (M - m), 0, 1)
+    return normalized
+    
+def dct_filters(n_filters, n_input):
+    """https://librosa.github.io/librosa/0.6.3/_modules/librosa/filters.html#dct
+    """
+    basis = np.empty((n_filters, n_input))
+    basis[0, :] = 1.0 / np.sqrt(n_input)
+
+    samples = np.arange(1, 2*n_input, 2) * np.pi / (2.0 * n_input)
+
+    for i in range(1, n_filters):
+        basis[i, :] = np.cos(i*samples) * np.sqrt(2.0/n_input)
+
+    return basis

@@ -8,8 +8,13 @@ from collections import namedtuple
 import soundfile as sf
 from pyrubberband import pyrb
 import librosa.effects
+import librosa.core
+import librosa.filters
 import numpy as np
 import pydub
+import scipy.fftpack
+
+from util.ft import normalize_0_1
 
 import pdb
 
@@ -286,3 +291,36 @@ def augment_audio_two_negatives(n_file1, n_file2, output_len, silence, loudness)
     output[:,1] *= k*loudness
 
     return output, labs
+
+def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
+    spec = np.abs(librosa.core.stft(samples,
+        win_length=win_length,
+        hop_length=hop_length,
+        n_fft=n_fft))
+    height = n_fft // 2
+    width = len(samples) // hop_length
+    spec = spec[:height,:width]
+    return spec
+
+def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
+    samples = librosa.effects.preemphasis(samples, coef=0.97)
+    
+    mag = np.abs(librosa.core.stft(samples,
+        win_length=win_length,
+        hop_length=hop_length,
+        n_fft=n_fft))
+        
+    mel_basis = librosa.filters.mel(sr, n_fft, n_mels) 
+    mel = np.dot(mel_basis, mag)
+    
+    mel_db = librosa.amplitude_to_db(mel)
+    # mfccs = dct(mel_db, n=n_mfcc)
+    
+    mel_db = normalize_0_1(mel_db, 35, -55)
+    
+    height = n_mels
+    width = len(samples) // hop_length
+    out = mel_db[:height,:width]
+    
+    return out
+    
