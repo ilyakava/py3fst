@@ -17,6 +17,7 @@ from audio_load import load_audio_from_files, audio2spec
 from st_2d import scat2d
 import windows as win
 
+from util.log import write_metadata
 from networks.highway import highway_block
 
 import pdb
@@ -77,7 +78,7 @@ def st_net_v1(x, dropout, reuse, is_training, n_classes, args):
         out = tf.layers.dense(fc, n_classes)
     return tf.squeeze(out, axis=1)
 
-def amazon_net(x, dropout, reuse, is_training, n_classes, args):
+def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
     spec_h = args.feature_height # ~freq
     spec_w = args.network_example_length // args.hop_length # time
 
@@ -88,7 +89,7 @@ def amazon_net(x, dropout, reuse, is_training, n_classes, args):
     context_chunk_size = spec_w // context_chunks
     
     with tf.variable_scope('amazon_net', reuse=reuse):
-        # x = x_dict['spectrograms']
+        x = x_dict['spectrograms']
         x = tf.reshape(x, (-1,spec_h,spec_w))
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
@@ -190,13 +191,12 @@ def train(args):
         
         features, labels = iterator.get_next()
         
-        return features, labels
+        return { 'spectrograms': features }, labels
     
     ############### END OF SETUP
     
     # Define the model function (following TF Estimator Template)
     def model_fn(features, labels, mode):
-        
     
         # Build the neural network
         # Because Dropout have different behavior at training and prediction time, we
@@ -240,10 +240,10 @@ def train(args):
         img_hat = get_image_summary(pred_probas)
         spec_h = args.feature_height # could cut off higher half frequencies here
         # log_specs = tf.log(features)
-        log_specs = features
-        bm = tf.reduce_min(log_specs, (1,2), keepdims=True)
-        bM = tf.reduce_max(log_specs, (1,2), keepdims=True)
-        img_specs = (log_specs - bm) / (bM - bm)
+        summary_specs = features['spectrograms']
+        bm = tf.reduce_min(summary_specs, (1,2), keepdims=True)
+        bM = tf.reduce_max(summary_specs, (1,2), keepdims=True)
+        img_specs = (summary_specs - bm) / (bM - bm)
         img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
         img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
         img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
@@ -271,6 +271,25 @@ def train(args):
     
     ###############################
     
+    # saving related
+    def identity_serving_input_receiver_fn():
+        """
+        This function is supposed to translate what the user gives the model
+        to what should actually be given to the model.
+        In our case this is the identity function.
+        
+        A useful way to use a 'serving_input_receiver_fn' would be to provide a
+        string of image bytes and read/convert it into a tensor of numbers for
+        the model.
+        """
+        serialized_tf_example = tf.placeholder(dtype=tf.float32, shape=[None, spec_h, spec_cut_w])
+        user_input = {'spectrograms': serialized_tf_example }
+        model_input = user_input
+        return tf.estimator.export.ServingInputReceiver(model_input, user_input)
+    
+    
+    # running
+    
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, train_parser), max_steps=args.max_steps)
@@ -280,6 +299,8 @@ def train(args):
     
     # 45 steps at example length is 1 hour
     # model.evaluate(input_fn = lambda: input_fn(args.val_data_root, eval_parser), steps=45)
+    
+    # model.export_savedmodel(args.model_root, identity_serving_input_receiver_fn)
 
 
 def main():
@@ -327,6 +348,7 @@ def main():
                       
                       
     args = parser.parse_args()
+    write_metadata(args.model_root, args)
     
     # create model dir if needed
     if not os.path.exists(args.model_root):
