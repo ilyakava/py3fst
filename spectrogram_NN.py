@@ -121,8 +121,52 @@ def train(args):
     network = amazon_net
     bs = args.batch_size
     n_classes = 1
+    spec_h = args.feature_height
+    spec_w = args.tfrecord_example_length // args.hop_length
+    spec_cut_w = args.network_example_length // args.hop_length
     
-    def input_fn(tfrecord_dir):
+    def train_parser(serialized_example):
+        """Parses a single tf.Example into x,y tensors.
+        
+        Does training data augmentation by selecting a random
+        sub-sequence at parse time.
+        """
+        features = tf.parse_single_example(
+          serialized_example,
+          features={
+              'spectrogram': tf.FixedLenFeature([spec_h * spec_w], tf.float32),
+              'spectrogram_label': tf.FixedLenFeature([spec_w], tf.int64),
+          })
+        spec = features['spectrogram']
+        label = tf.cast(features['spectrogram_label'], tf.int32)
+        spec = tf.reshape(spec, (spec_h, spec_w))
+        # both of these need to be trimmed
+        
+        si = random.randint(0, spec_w - spec_cut_w - 1)
+        ei = si + spec_cut_w
+        
+        # downsample by 2 here b/c that's what happens in the network
+        return spec[:,si:ei], label[si:ei:2]
+        
+    def eval_parser(serialized_example):
+        """Parses a single tf.Example into x,y tensors.
+        
+        In the eval case they are exactly the right length already.
+        """
+        features = tf.parse_single_example(
+          serialized_example,
+          features={
+              'spectrogram': tf.FixedLenFeature([spec_h * spec_cut_w], tf.float32),
+              'spectrogram_label': tf.FixedLenFeature([spec_cut_w], tf.int64),
+          })
+        spec = features['spectrogram']
+        label = tf.cast(features['spectrogram_label'], tf.int32)
+        spec = tf.reshape(spec, (spec_h, spec_cut_w))
+        
+        # downsample by 2 here b/c that's what happens in the network
+        return spec, label[::2]
+    
+    def input_fn(tfrecord_dir, parser=train_parser):
         """
         This function is called once for every example for every epoch, so
         data augmentation that happens randomly will be different every
@@ -134,28 +178,7 @@ def train(args):
         tfrecord_files = tf.io.gfile.glob(os.path.join(tfrecord_dir, '*.tfrecord'))
         random.shuffle(tfrecord_files)
         dataset = tf.data.TFRecordDataset(tfrecord_files)
-        spec_h = args.feature_height
-        spec_w = args.tfrecord_example_length // args.hop_length
-
-        def parser(serialized_example):
-            """Parses a single tf.Example into x,y tensors.
-            """
-            features = tf.parse_single_example(
-              serialized_example,
-              features={
-                  'spectrogram': tf.FixedLenFeature([spec_h * spec_w], tf.float32),
-                  'spectrogram_label': tf.FixedLenFeature([spec_w], tf.int64),
-              })
-            spec = features['spectrogram']
-            label = tf.cast(features['spectrogram_label'], tf.int32)
-            spec = tf.reshape(spec, (spec_h, spec_w))
-            # both of these need to be trimmed
-            spec_cut_w = args.network_example_length // args.hop_length
-            si = random.randint(0, spec_w - spec_cut_w - 1)
-            ei = si + spec_cut_w
-            
-            # downsample by 2 here b/c that's what happens in the network
-            return spec[:,si:ei], label[si:ei:2]
+        
         
         # Map the parser over dataset, and batch results by up to batch_size
         dataset = dataset.map(parser)
@@ -198,30 +221,8 @@ def train(args):
         train_op = optimizer.minimize(loss_op,
                                       global_step=tf.train.get_global_step())
     
-        # Evaluate the accuracy of the model
+        # Evaluate the accuracy of the masks
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-        
-        # smooth the time-series prediction
-        alpha = 0.1
-        N = 30 #int((sr * 0.6) // args.hop_length // 2)
-        exp_filt = alpha*((1-alpha)**np.arange(0,N))
-        exp_filt[-1] /= alpha
-        exp_filt = exp_filt.reshape((N,1))
-        
-        smoothed_logits = tf.layers.conv1d(
-            tf.expand_dims(logits_val,-1),
-            1,
-            N,
-            strides=(1),
-            padding='same',
-            dilation_rate=(1),
-            activation=None,
-            use_bias=False,
-            kernel_initializer=tf.constant_initializer(exp_filt, dtype=tf.float32),
-            trainable=False,
-            name=None
-        )
-        smoothed_pred_probas = tf.squeeze(tf.math.sigmoid(smoothed_logits), -1)
         
         # show masks that are being made
         def get_image_summary(ts_lab):
@@ -237,7 +238,6 @@ def train(args):
         
         # image-ify the features
         img_hat = get_image_summary(pred_probas)
-        img_hat_smoothed = get_image_summary(smoothed_pred_probas)
         spec_h = args.feature_height # could cut off higher half frequencies here
         # log_specs = tf.log(features)
         log_specs = features
@@ -246,12 +246,12 @@ def train(args):
         img_specs = (log_specs - bm) / (bM - bm)
         img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
         img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
-        img_compare = tf.concat([img_hat, img_hat_smoothed, img_gt, img_specs], axis=1)
+        img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
         tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
         
-        myevalops = {'accuracy': acc_op}
+        myevalops = {'mask_accuracy': acc_op}
         # reduce across time
-        clip_probas = tf.reduce_max(smoothed_pred_probas, axis=1)
+        clip_probas = tf.reduce_mean(pred_probas, axis=1)
         # clip_probas = tf.clip_by_value(clip_probas, 0, 1)
         clip_gt = tf.reduce_max(labels, axis=1)
         threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
@@ -273,13 +273,13 @@ def train(args):
     
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
-    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root), max_steps=args.max_steps)
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root), steps=45)
+    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, train_parser), max_steps=args.max_steps)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, eval_parser), steps=45)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
     # 45 steps at example length is 1 hour
-    # model.evaluate(input_fn = lambda: input_fn(args.val_data_root), steps=45)
+    # model.evaluate(input_fn = lambda: input_fn(args.val_data_root, eval_parser), steps=45)
 
 
 def main():

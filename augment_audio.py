@@ -272,11 +272,10 @@ def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_
 def get_chunk(samples, chunk):
     return np.array(samples[chunk[0]:chunk[1]])
 
-def augment_audio_two_negatives(n_file1, n_file2, output_len, silence, loudness):
+def augment_audio_two_negatives(n_file1, n_file2, silence, loudness):
     """
     Args:
       silence: in ms
-      output_advance: in ms. If 0 starts from the second clip.
     """
     a, _ = sf.read(n_file1)
     b, _ = sf.read(n_file2)

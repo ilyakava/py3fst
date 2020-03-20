@@ -24,13 +24,12 @@ from tqdm import tqdm
 import tensorflow as tf
 
 from util.log import write_metadata
-from augment_audio import augment_audio, extract_example, samples2feature
+from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam
 
 import pdb
 
 counter = None
-# random.seed(2020)
-# record_writer_options = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.GZIP)
+random.seed(2020)
 
 sr = 16000
 pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
@@ -54,8 +53,8 @@ parser.add_argument('--positive_multiplier', default=1, type=int,
                     help='...')
 parser.add_argument('--max_per_record', default=200, type=int,
                     help='Should be set such that each tfrecord file is ~100MB.')
-parser.add_argument("--train_path", help="...")
-parser.add_argument("--val_path", help="...")
+parser.add_argument("--train_path", help="...", default=None)
+parser.add_argument("--val_path", help="...", default=None)
 parser.add_argument('--percentage_train', default=0.8, type=float,
                     help='...')
 parser.add_argument('--win_length', default=sr//40, type=int,
@@ -64,7 +63,6 @@ parser.add_argument('--hop_length', default=sr//100, type=int,
                     help='... Becomes the frame size (One frame per this many audio samples).')
 parser.add_argument('--example_length', default=80000, type=int,
                     help='The length in samples of examples to output. It should be a multiple of hop_length.')
-
 
 parser.add_argument('--threads', default=8, type=int,
                     help='Number of threads to use')
@@ -100,12 +98,12 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
         feature['id'] = _int64_feature(sample_id)
     
     assert len(samples) == example_length, 'Length of samples is wrong, expected %i received %i.' % (example_length, len(samples))
+    assert len(samples_label) == example_length, 'Length of samples_label is wrong, expected %i received %i.' % (example_length, len(samples_label))
     assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
     
-    spec = samples2feature(samples, win_length, hop_length)
+    spec = samples2spectrogam(samples, win_length, hop_length)
     
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
-    
     samp_max_pool = maximum_filter1d(samples_label, size=args.win_length, mode='constant', cval=0)[::args.hop_length]
     feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
     
@@ -149,7 +147,10 @@ def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
 def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir,
-                                   label, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+                                   output_negative_version, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+    """
+    output_negative_version: if True then output an audio file without any wakeword also
+    """
     global counter
     num_examples = 0
     next_record = 0
@@ -195,6 +196,26 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             if counter:
                 with counter.get_lock():
                     counter.value += 1
+            
+            # add purely negative example also
+            if output_negative_version:
+                _, silence, _, loudness = augment_settings[j]
+                output, labs = augment_audio_two_negatives(n_file, n_file, silence, loudness)
+                mix = output.mean(axis=1)
+                samples = extract_example(mix, labs[0,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
+                samples_labs = np.zeros(example_length, dtype=int)
+                
+                example = serialize_example(samples, samples_labs, win_length, hop_length, example_length)
+            
+                record_writer, next_record, num_examples = _update_record_writer(
+                    record_writer=record_writer, next_record=next_record,
+                    num_examples=num_examples, output_dir=output_dir,
+                    max_per_record=max_per_record, text=text)
+                record_writer.write(example)
+                if counter:
+                    with counter.get_lock():
+                        counter.value += 1
+                
 
     record_writer.close()
 
@@ -206,7 +227,7 @@ def _init_pool(l, c):
     
 _idx_offset = 0
 
-def build_dataset_randomized(args, p_files, n_files, path):
+def build_dataset_randomized(args, p_files, n_files, path, output_negative_version=False):
     """Chunking stage.
     
     Chunked by number threads.
@@ -234,7 +255,7 @@ def build_dataset_randomized(args, p_files, n_files, path):
                           'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
                           'positive_multiplier': args.positive_multiplier,
                           'output_dir': path,
-                          'label': 1,
+                          'output_negative_version': output_negative_version,
                           'max_per_record': args.max_per_record,
                           'text': '_clean_speech_%.2d' % i,
                           'idx_offset': _idx_offset,
@@ -320,7 +341,8 @@ def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
 if __name__ == '__main__':
     args = parser.parse_args()
 
-    write_metadata(args.train_path, args)
+    metadata_path = args.train_path if args.train_path is not None else args.val_path
+    write_metadata(metadata_path, args)
 
     n_train_files, n_val_files = train_val_speaker_separation(args.negative_data_dir, fglob='*/*.flac', percentage_train=args.percentage_train)
     p_train_files, p_val_files = train_val_speaker_separation_wakeword_metafile(args, percentage_train=args.percentage_train)
@@ -331,11 +353,14 @@ if __name__ == '__main__':
     random.shuffle(n_train_files)
     random.shuffle(n_val_files)
     
-    build_dataset_randomized(args,
-                            p_files=p_train_files,
-                            n_files=n_train_files,
-                            path=args.train_path)
-    build_dataset_randomized(args,
-                            p_files=p_val_files,
-                            n_files=n_val_files,
-                            path=args.val_path)
+    if args.train_path is not None:
+        build_dataset_randomized(args,
+                                p_files=p_train_files,
+                                n_files=n_train_files,
+                                path=args.train_path)
+    if args.val_path is not None:
+        build_dataset_randomized(args,
+                                p_files=p_val_files,
+                                n_files=n_val_files,
+                                path=args.val_path,
+                                output_negative_version=True)
