@@ -24,7 +24,7 @@ from tqdm import tqdm
 import tensorflow as tf
 
 from util.log import write_metadata
-from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam
+from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam, augment_audio_two_negatives
 
 import pdb
 
