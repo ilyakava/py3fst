@@ -212,7 +212,7 @@ def train(args):
     
         # If prediction mode, early return
         if mode == tf.estimator.ModeKeys.PREDICT:
-            return tf.estimator.EstimatorSpec(mode, predictions=pred_classes)
+            return tf.estimator.EstimatorSpec(mode, predictions=pred_probas)
     
         # Define loss and optimizer
         loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
