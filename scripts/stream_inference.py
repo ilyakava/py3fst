@@ -50,12 +50,12 @@ class MovingWindowPerf(MovingAvgPerf):
   def tick(self):
     super().tick(monotonic())
 
-  def fps_str(self):
+  def fps_str(self, text='fps'):
     if len(self.times) == 1:
       fps = 0
     else:
       fps = len(self.times) / (self.times[-1] - self.times[0])
-    return '%.2f fps' % fps
+    return '%.2f %s' % (fps, text)
 
 def __draw_label(img, text, bg_color):
     font_face = cv2.FONT_HERSHEY_SIMPLEX
@@ -90,10 +90,11 @@ def __draw_label(img, text, bg_color):
 buffer_size_s = 5
 samplerate = 16000
 window_length = int(0.025 * samplerate)
+n_fft = 512
+hop_length = int(0.01 * samplerate)
 
-hop_length = int(0.01 * samplerate) # hop length
 samples_buffer_block_size = hop_length
-samples_buffer_nblocks = 1 + window_length // samples_buffer_block_size
+samples_buffer_nblocks = 1 + n_fft // samples_buffer_block_size
 samples_buffer = np.zeros(samples_buffer_nblocks * samples_buffer_block_size)
 samples_buffer_p = 0
 
@@ -107,9 +108,11 @@ spec_buffer_pad = buffer_pad_size_s * samplerate // samples_buffer_block_size
 spec_buffer = np.zeros((spec_buffer_h, spec_buffer_pad + spec_buffer_w))
 spec_buffer_p = 0
 
-fftsize = 512
-
+# modeled after: https://librosa.github.io/librosa/_modules/librosa/core/spectrum.html#stft
 fft_window = get_window('hann', window_length, fftbins=True)
+fft_window = pad_center(fft_window, n_fft)
+
+columns = 80
 
 
 def update_spectrogram(indata, frames, time, status):
@@ -131,17 +134,17 @@ def update_spectrogram(indata, frames, time, status):
             se = (samples_buffer_p + 1) * samples_buffer_block_size
             samples_buffer[ss:se] = indata[:, 0]
             # fft
-            magnitude = np.abs(np.fft.rfft(fft_window * samples_buffer[-window_length:], n=fftsize))
+            magnitude = np.abs(np.fft.rfft(fft_window * samples_buffer[-n_fft:], n=n_fft))
             
             # primary write
             write_idx = (spec_buffer_p % spec_buffer_w)
-            spec_buffer[:, spec_buffer_pad + write_idx] = magnitude[:fftsize//2]
+            spec_buffer[:, spec_buffer_pad + write_idx] = magnitude[:n_fft//2]
             # secondary buffer write
             if spec_buffer_w < write_idx + spec_buffer_pad:
                 pad_write_idx = (write_idx + spec_buffer_pad) % spec_buffer_w
-                spec_buffer[:, pad_write_idx] = magnitude[:fftsize//2]
-            spec_buffer_p += 1
+                spec_buffer[:, pad_write_idx] = magnitude[:n_fft//2]
 
+            spec_buffer_p += 1
             samples_buffer = np.roll(samples_buffer, -samples_buffer_block_size)
 
             # ANSI text version
@@ -189,7 +192,7 @@ def stream_inference_of_microphone_audio(args):
 
             perf = MovingWindowPerf()
             while True:
-                sleep(0.01) # restrict max fps to 100
+                # sleep(0.01) # restrict max fps to 100
                 imageify = spec_buffer[:,spec_buffer_pad:].copy()
                 imageify = np.log(1+imageify)
                 imageify = (imageify - imageify.min()) / (imageify.max() - imageify.min())
@@ -232,16 +235,13 @@ def stream_inference_of_microphone_audio(args):
                 cv2.line(frame, (idx_now, 0), (idx_now, spec_buffer_h), (0,255,0), 2)
                 cv2.line(frame, (0, spec_buffer_h//2), (spec_buffer_w, spec_buffer_h//2), (0,0,255), 2)
 
-                __draw_label(frame, perf.fps_str(), (0,255,0))
-                # cv2.putText(frame, perf.fps_str(), (spec_buffer_w-10,spec_buffer_h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+                __draw_label(frame, perf.fps_str('inferences/sec'), (0,255,0))
 
                 cv2.imshow("Press 'q' to quit", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
 
 def main():
-    columns = 80
-
     usage_line = ' press q to quit '
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
