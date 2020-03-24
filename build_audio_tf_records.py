@@ -14,6 +14,7 @@ import time
 from multiprocessing.pool import Pool
 from multiprocessing import Lock, Value
 
+from librosa.util import pad_center, frame
 import numpy as np
 from pydub import AudioSegment
 from pyrubberband import pyrb
@@ -24,6 +25,8 @@ from tqdm import tqdm
 import tensorflow as tf
 
 from util.log import write_metadata
+from util.misc import mkdirp
+from util.phones import load_vocab
 from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam, augment_audio_two_negatives
 
 import pdb
@@ -46,6 +49,7 @@ lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
 
 parser = argparse.ArgumentParser()
 
+parser.add_argument("--dataset_type", help="wakeword | TIMIT", default="wakeword")
 parser.add_argument("--positive_data_dir", help="...")
 parser.add_argument("--wakeword_metafile", help="...")
 parser.add_argument("--negative_data_dir", help="...")
@@ -146,8 +150,7 @@ def _update_record_writer(record_writer, next_record, num_examples,
 def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
-def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir,
-                                   output_negative_version, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir, output_negative_version, max_per_record, text, idx_offset, win_length, hop_length, example_length):
     """
     output_negative_version: if True then output an audio file without any wakeword also
     """
@@ -219,6 +222,69 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
 
     record_writer.close()
 
+def _build_tf_records_from_phoneme_dataset_wrapper(kwargs):
+    return _build_tf_records_from_phoneme_dataset(**kwargs)
+
+def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+    """Builds tfrecords from TIMIT where whole source is used.
+    Padded with zeros to be constant length. Segments are extracted
+    with half second overlap.
+    """
+    global counter
+    num_examples = 0
+    next_record = 0
+    record_writer = None
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for idx, wav_file in enumerate(tqdm(files, desc='Recordings Processed')):
+        
+        samples, _ = sf.read(wav_file)
+        
+    
+        # phones (targets)
+        phn_file = wav_file.replace("WAV", "PHN")
+        phn2idx, idx2phn = load_vocab()
+        phns = np.zeros(shape=(len(samples),), dtype=int)
+        bnd_list = []
+        for line in open(phn_file, 'rb').read().splitlines():
+            start_sample, _, phn = line.split()
+            start_sample = int(start_sample)
+            phn = phn.decode(encoding="utf-8")
+            phns[start_sample:] = phn2idx[phn]
+            bnd_list.append(start_sample)
+        
+        # example will be split into sections len example_length
+        # and overlap of example_overlap
+        example_overlap = (sr // 2)
+        example_hop = example_length - (sr // 2)
+        if (len(samples) < example_length):
+            padding = example_length - len(samples)
+        else:
+            # samples are longer than example_length, so the length traversed
+            # when creating the frames will be n * hops + example_length
+            padding = example_hop - (len(samples) - example_length) % example_hop
+
+        samples = pad_center(samples, len(samples) + padding)
+        phns = pad_center(phns, len(phns) + padding)
+        samples = frame(samples, frame_length=example_length, hop_length=example_hop)
+        phns = frame(phns, frame_length=example_length, hop_length=example_hop)
+        
+        for sub_clip_i in range(samples.shape[1]):
+            
+            example = serialize_example(samples[:,sub_clip_i], phns[:,sub_clip_i], win_length, hop_length, example_length)
+        
+            record_writer, next_record, num_examples = _update_record_writer(
+                record_writer=record_writer, next_record=next_record,
+                num_examples=num_examples, output_dir=output_dir,
+                max_per_record=max_per_record, text=text)
+            record_writer.write(example)
+            if counter:
+                with counter.get_lock():
+                    counter.value += 1
+
+    record_writer.close()
+
 
 def _init_pool(l, c):
     global lock, counter
@@ -275,6 +341,49 @@ def build_dataset_randomized(args, p_files, n_files, path, output_negative_versi
     else:
         for a in args_list:
             _build_tf_records_from_dataset_wrapper(a)
+
+    pool.close()
+    pool.join()
+    print('Work done, took %.1f min.' % ((time.time() - start_time)/60.0))
+    print('Made %i examples.' % counter.value)
+    
+def build_phoneme_dataset_randomized(args, files, path):
+    """Chunking stage.
+    
+    Chunked by number threads.
+    """
+    global _idx_offset, counter
+    lock = Lock()
+    counter = Value('i', 0)
+    
+    pool = Pool(initializer=_init_pool, initargs=(lock, counter),
+                processes=args.threads)
+    args_list = []
+    files_chunk_size = len(files) // args.threads
+    for i in range(args.threads):
+        files_chunk = files[i*files_chunk_size:((i+1)*files_chunk_size)]
+        files_chunk_ = [os.path.join(*fname.split('/')[-2:]) for fname in files_chunk]
+        
+        args_list.append({'files': files_chunk,
+                          'output_dir': path,
+                          'max_per_record': args.max_per_record,
+                          'text': '_clean_TIMIT_%.2d' % i,
+                          'idx_offset': _idx_offset,
+                          'win_length': args.win_length,
+                          'hop_length': args.hop_length,
+                          'example_length': args.example_length
+        })
+    
+    print('Work scheduled, starting now...')
+    start_time = time.time()
+
+    if args.threads > 1:
+        for _ in pool.imap_unordered(_build_tf_records_from_phoneme_dataset_wrapper,
+                                     args_list):
+            pass
+    else:
+        for a in args_list:
+            _build_tf_records_from_phoneme_dataset_wrapper(a)
 
     pool.close()
     pool.join()
@@ -338,12 +447,7 @@ def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
 
     return train_files, val_files
 
-if __name__ == '__main__':
-    args = parser.parse_args()
-
-    metadata_path = args.train_path if args.train_path is not None else args.val_path
-    write_metadata(metadata_path, args)
-
+def create_wakeword_dataset(args):
     n_train_files, n_val_files = train_val_speaker_separation(args.negative_data_dir, fglob='*/*.flac', percentage_train=args.percentage_train)
     p_train_files, p_val_files = train_val_speaker_separation_wakeword_metafile(args, percentage_train=args.percentage_train)
     
@@ -364,3 +468,31 @@ if __name__ == '__main__':
                                 n_files=n_val_files,
                                 path=args.val_path,
                                 output_negative_version=True)
+
+def create_phoneme_dataset(args):
+    # speaker separation for phonemes
+    
+    
+    if args.train_path is not None:
+        mkdirp(args.train_path)
+        train_files = glob.glob(os.path.join(args.positive_data_dir, 'TRAIN/*/*/*.WAV'))
+        assert len(train_files)
+        build_phoneme_dataset_randomized(args, train_files, args.train_path)
+    if args.val_path is not None:
+        mkdirp(args.val_path)
+        val_files = glob.glob(os.path.join(args.positive_data_dir, 'TEST/*/*/*.WAV'))
+        assert len(val_files)
+        build_phoneme_dataset_randomized(args, val_files, args.val_path)
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+
+    metadata_path = args.train_path if args.train_path is not None else args.val_path
+    write_metadata(metadata_path, args)
+
+    if args.dataset_type == 'wakeword':
+        create_wakeword_dataset(args)
+    elif args.dataset_type == 'TIMIT':
+        create_phoneme_dataset(args)
+    else:
+        raise ValueError("%s is not a valid --dataset_type" % args.dataset_type)
