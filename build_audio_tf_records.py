@@ -474,18 +474,21 @@ def create_phoneme_dataset(args):
     
     
     if args.train_path is not None:
-        mkdirp(args.train_path)
         train_files = glob.glob(os.path.join(args.positive_data_dir, 'TRAIN/*/*/*.WAV'))
         assert len(train_files)
         build_phoneme_dataset_randomized(args, train_files, args.train_path)
     if args.val_path is not None:
-        mkdirp(args.val_path)
         val_files = glob.glob(os.path.join(args.positive_data_dir, 'TEST/*/*/*.WAV'))
         assert len(val_files)
         build_phoneme_dataset_randomized(args, val_files, args.val_path)
 
 if __name__ == '__main__':
     args = parser.parse_args()
+    
+    if args.train_path is not None:
+        mkdirp(args.train_path)
+    if args.val_path is not None:
+        mkdirp(args.val_path)
 
     metadata_path = args.train_path if args.train_path is not None else args.val_path
     write_metadata(metadata_path, args)
