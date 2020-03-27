@@ -3,6 +3,8 @@ from collections import namedtuple
 import tensorflow as tf
 
 from networks.highway import highway_block
+from st_2d import scat2d
+import windows as win
 
 layerO = namedtuple('layerO', ['strides', 'padding'])
 
@@ -42,7 +44,8 @@ def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
 
         # get classification
         out = tf.layers.dense(out, n_classes)
-        out = tf.squeeze(out, axis=-1) # [-1, t//2]
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=2) # [-1, t//2]
 
     return out
 
