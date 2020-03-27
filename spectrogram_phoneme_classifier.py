@@ -89,7 +89,7 @@ def train(args):
         myevalops['phoneme_confusion'] = (confusion, confusion_op)
         confusion_img = tf.reshape( tf.cast( confusion, tf.float32),
                                   [1, n_classes, n_classes, 1])
-        tf.summary.image('confusion', confusion_img)
+        tf.summary.image('confusion', tf.log(1+confusion_img))
         
         # Create a SummarySaverHook
         eval_summary_hook = tf.estimator.SummarySaverHook(

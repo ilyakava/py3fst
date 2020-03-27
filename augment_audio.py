@@ -309,7 +309,7 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
 
 def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
     """Like in deep-voice-conversion
-    Which only uses mfcc
+    (Which only uses mfcc)
     """
     samples = librosa.effects.preemphasis(samples, coef=0.97)
     
@@ -323,12 +323,14 @@ def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfc
     
     mel_db = librosa.amplitude_to_db(mel)
     # mfccs = dct(mel_db, n=n_mfcc)
+    # return mfccs
     
+    # normalize mel only
     mel_db = normalize_0_1(mel_db, -55, 35)
     
     height = n_mels
     width = len(samples) // hop_length
-    out = mel_db[:height,:width]
+    out = mel_db[:height,-width:] # border effect is visible in first 2 columns in width
     
     return out
     

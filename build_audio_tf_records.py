@@ -42,7 +42,7 @@ loudness_opts = [0.75,1.0,1.25]
 positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
 lengths_ms = np.arange(0.4,0.9,0.05)
-lengths_probabilities = np.array([ 11, 26, 56, 45, 43, 33, 21, 7,  1])
+lengths_probabilities = np.array([16, 31, 80, 73, 76, 46, 26, 12, 4])
 lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
 
 
@@ -108,6 +108,7 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     spec = samples2spectrogam(samples, win_length, hop_length)
     
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
+    # the labels need to be adapted to the feature size
     samp_max_pool = maximum_filter1d(samples_label, size=args.win_length, mode='constant', cval=0)[::args.hop_length]
     feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
     
