@@ -12,6 +12,7 @@ import librosa.core
 import librosa.filters
 import numpy as np
 import pydub
+import pyroomacoustics as pra
 import scipy.fftpack
 
 from util.ft import normalize_0_1
@@ -290,6 +291,59 @@ def augment_audio_two_negatives(n_file1, n_file2, silence, loudness):
     output[:,1] *= k*loudness
 
     return output, labs
+
+# Audio mixing with room sim constants
+standing_height = 1.65
+siting_height = 1.2
+speaker_height = standing_height # no big difference
+table_height = 0.75
+dist_to_wall = 0.6 # 0.3 is one foot
+
+def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_rel_distance):
+    """Use a room sim to mix two sources of audio.
+    
+    Room Arrangement:
+    The room is a cube. and  source1-Mic-source2 is set to be
+    an equilateral triangle at first. Then source1 is walked
+    towards the mic according to source1_to_mic_rel_distance.
+    1.0 means it is not walked to the mic at all. 0.05 means it
+    is on top of the mic. The room mixer adjusts the volume
+    automatically. With a value of 0.01 source2 is barely audible. 
+    
+    Args:
+        room_dim: [x, y, z] dims in meters of room
+        room_absorption: float 0 to 1, 0 is high reflection, extreme
+            values are noticible but otherwise is subtle.
+        source1_to_mic_rel_distance: float 0 to 1, described above.
+        source1: mono audio samples assumed to be already aligned
+            with source2 which is assumed to be the same shape.
+    Returns:
+        mono mixed sound
+    """
+    corners = np.array([[0,0], [0,room_dim[0]], [room_dim[1],room_dim[0]], [room_dim[1],0]]).T
+    height = room_dim[2]
+    pos1 = np.array([dist_to_wall, dist_to_wall, speaker_height])
+    pos2 = np.array([room_dim[1]-dist_to_wall, dist_to_wall, speaker_height])
+    mic_radius = .005
+    # when mic array is this small, no big difference since
+    # we ignore direction here
+    n_mic = 1
+    mic_pos = np.array([room_dim[1]/2, room_dim[0], table_height])
+    
+    pos1 = (1-source1_to_mic_rel_distance)*mic_pos + source1_to_mic_rel_distance*pos1
+    
+    room = pra.Room.from_corners(corners, fs=16000, absorption=room_absorption, max_order=5)
+    room.extrude(height)
+    room.add_source(pos1, signal=source1)
+    room.add_source(pos2,signal=source2)
+    R = pra.circular_2D_array(mic_pos[:2], n_mic, 0, mic_radius)
+    R = np.concatenate((R, np.ones((1, n_mic)) * mic_pos[2]), axis=0)
+    mics = pra.MicrophoneArray(R, sr)
+    room.add_microphone_array(mics)
+    
+    room.simulate()
+    mono_room = np.mean(room.mic_array.signals, axis=0)
+    return mono_room
 
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     spec = np.abs(librosa.core.stft(samples,
