@@ -299,9 +299,18 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     height = n_fft // 2
     width = len(samples) // hop_length
     spec = spec[:height,:width]
+    
+    spec_db = librosa.amplitude_to_db(spec)
+    spec_db = np.clip(spec_db, -55, 65)
+    spec = librosa.db_to_amplitude(spec_db)
+    spec = normalize_0_1(spec)
+    
     return spec
 
 def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
+    """Like in deep-voice-conversion
+    Which only uses mfcc
+    """
     samples = librosa.effects.preemphasis(samples, coef=0.97)
     
     mag = np.abs(librosa.core.stft(samples,
@@ -315,7 +324,7 @@ def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfc
     mel_db = librosa.amplitude_to_db(mel)
     # mfccs = dct(mel_db, n=n_mfcc)
     
-    mel_db = normalize_0_1(mel_db, 35, -55)
+    mel_db = normalize_0_1(mel_db, -55, 35)
     
     height = n_mels
     width = len(samples) // hop_length

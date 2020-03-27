@@ -14,7 +14,7 @@ def closest_power_of_2(x):
     else:
         return p
         
-def normalize_0_1(values, M=None, m=None):
+def normalize_0_1(values, m=None, M=None):
     """deep-voice-conversion
     """
     m = m if m is not None else values.min()
