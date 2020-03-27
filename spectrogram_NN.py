@@ -2,25 +2,17 @@
 """
 
 from functools import partial
-import glob
 import logging
 import os
-import random
-
-# random.seed(2020)
 
 import argparse
 import numpy as np
 import tensorflow as tf
 
-from audio_load import load_audio_from_files, audio2spec
-from st_2d import scat2d
-import windows as win
-
 from util.log import write_metadata
+from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
 from networks.spectrogram_networks import amazon_net
-from networks.highway import highway_block
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn
 
 import pdb
@@ -154,12 +146,11 @@ def main():
 
     args = parser.parse_args()
     
+    # create model dir if needed
+    mkdirp(args.model_root)
+    
     # save arguments ran with
     write_metadata(args.model_root, args)
-    
-    # create model dir if needed
-    if not os.path.exists(args.model_root):
-        os.makedirs(args.model_root)
     
     # get TF logger
     log = logging.getLogger('tensorflow')
