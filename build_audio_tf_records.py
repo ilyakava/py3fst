@@ -244,7 +244,7 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, te
     
         # phones (targets)
         phn_file = wav_file.replace("WAV", "PHN")
-        phn2idx, idx2phn = load_vocab()
+        phn2idx, _, _ = load_vocab()
         phns = np.zeros(shape=(len(samples),), dtype=int)
         bnd_list = []
         for line in open(phn_file, 'rb').read().splitlines():
