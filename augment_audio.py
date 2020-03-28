@@ -352,7 +352,7 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
         n_fft=n_fft))
     height = n_fft // 2
     width = len(samples) // hop_length
-    spec = spec[:height,:width]
+    spec = spec[-height:,-width:]
     
     spec_db = librosa.amplitude_to_db(spec)
     spec_db = np.clip(spec_db, -55, 65)
@@ -384,7 +384,7 @@ def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfc
     
     height = n_mels
     width = len(samples) // hop_length
-    out = mel_db[:height,-width:] # border effect is visible in first 2 columns in width
+    out = mel_db[-height:,-width:] # border effect is visible in first 2 columns in width
     
     return out
     

@@ -30,4 +30,7 @@ def add_basic_NN_arguments(parser):
     parser.add_argument(
         '--eval_period', type=int, default=5000,
         help='Eval after every N itrs.')
+    parser.add_argument(
+        '--eval_only', action='store_true',
+        help='Do not train only eval.')
     return parser

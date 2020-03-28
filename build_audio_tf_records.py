@@ -36,8 +36,8 @@ random.seed(2020)
 
 sr = 16000
 pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
-silence_1_opts = np.arange(-0.1, 0.2, 0.05).tolist()
-silence_2_opts = np.arange(-0.1, 0.2, 0.05).tolist()
+silence_1_opts = np.arange(-0.1, 0.35, 0.05).tolist()
+silence_2_opts = np.arange(-0.1, 0.35, 0.05).tolist()
 loudness_opts = [1.0]
 positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
@@ -45,14 +45,14 @@ lengths_ms = np.arange(0.4,0.9,0.05)
 lengths_probabilities = np.array([16, 31, 80, 73, 76, 46, 26, 12, 4])
 lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
 
-# large room, small room
+# small room, large room
 bedroom = [4.9, 3.6, 3.5]
 large_livingroom = [8.5, 6.7, 3.5]
 room_dim_opts = [bedroom, large_livingroom]
-# absorption big/small
-room_absorption_opts = [0.1,0.8,0.9,1.0] # prefer non-echoey rooms
-# closeness of wakeword
-wakeword_to_mic_rel_distance_opts = [0.1,0.5,1.0]
+# absorption small...big
+room_absorption_opts = [0.1,0.8,0.85,0.9,0.95,1.0] # prefer non-echoey rooms
+# far-ness of wakeword
+wakeword_to_mic_rel_distance_opts = [0.25,0.5,1.0]
 
 room_sim_opts = list(product(*[room_dim_opts, room_absorption_opts, wakeword_to_mic_rel_distance_opts]))
 

@@ -63,6 +63,8 @@ def train(args):
     
         # Evaluate the accuracy of the masks
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
+        myevalops = {'mask_accuracy': acc_op}
+        eval_hooks = []
         
         # show masks that are being made
         def get_image_summary(ts_lab):
@@ -89,7 +91,7 @@ def train(args):
         img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
         tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
         
-        myevalops = {'mask_accuracy': acc_op}
+        
         # reduce across time
         clip_probas = tf.reduce_mean(pred_probas, axis=1)
         # clip_probas = tf.clip_by_value(clip_probas, 0, 1)
@@ -98,6 +100,14 @@ def train(args):
         for sensitivity in threshes:
             myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
         
+        # Create a SummarySaverHook
+        eval_summary_hook = tf.estimator.SummarySaverHook(
+                                        save_steps=1,
+                                        output_dir= args.model_root + "/eval",
+                                        summary_op=tf.summary.merge_all())
+        # Add it to the evaluation_hook list
+        eval_hooks.append(eval_summary_hook)
+        
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
         estim_specs = tf.estimator.EstimatorSpec(
@@ -105,7 +115,8 @@ def train(args):
             predictions=pred_classes,
             loss=loss_op,
             train_op=train_op,
-            eval_metric_ops=myevalops)
+            eval_metric_ops=myevalops,
+            evaluation_hooks=eval_hooks)
     
         return estim_specs
     
@@ -117,9 +128,12 @@ def train(args):
     # 45 steps at example_length=19840 is 1 hour
     eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45)
     
-    tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
+    if args.eval_only:
+        model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
+    else:
+        tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
-    # model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
+    
     
     # saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
     # model.export_savedmodel(args.model_root, saved_model_serving_input_receiver_fn)
