@@ -27,7 +27,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
-from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam, augment_audio_two_negatives, mix_2_sources
+from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio
 
 import pdb
 
@@ -77,6 +77,7 @@ parser.add_argument('--hop_length', default=sr//100, type=int,
                     help='... Becomes the frame size (One frame per this many audio samples).')
 parser.add_argument('--example_length', default=80000, type=int,
                     help='The length in samples of examples to output. It should be a multiple of hop_length.')
+parser.add_argument("--noise_type", help="clean | gwn", default="clean")
 
 parser.add_argument('--threads', default=8, type=int,
                     help='Number of threads to use')
@@ -116,12 +117,12 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
     
     spec = samples2spectrogam(samples, win_length, hop_length)
+    # spec = samples2mfcc(samples, win_length, hop_length)
     
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
     # the labels need to be adapted to the feature size
     samp_max_pool = maximum_filter1d(samples_label, size=args.win_length, mode='constant', cval=0)[::args.hop_length]
     feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
-    
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
     audio_segment = AudioSegment(
@@ -240,7 +241,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
 def _build_tf_records_from_phoneme_dataset_wrapper(kwargs):
     return _build_tf_records_from_phoneme_dataset(**kwargs)
 
-def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, text, idx_offset, win_length, hop_length, example_length, noise_type):
     """Builds tfrecords from TIMIT where whole source is used.
     Padded with zeros to be constant length. Segments are extracted
     with half second overlap.
@@ -255,7 +256,6 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, te
     for idx, wav_file in enumerate(tqdm(files, desc='Recordings Processed')):
         
         samples, _ = sf.read(wav_file)
-        
     
         # phones (targets)
         phn_file = wav_file.replace("WAV", "PHN")
@@ -285,9 +285,20 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, te
         samples = frame(samples, frame_length=example_length, hop_length=example_hop)
         phns = frame(phns, frame_length=example_length, hop_length=example_hop)
         
+        mix_settings = random.sample(room_sim_opts, samples.shape[1])
         for sub_clip_i in range(samples.shape[1]):
+            y = np.array(samples[:,sub_clip_i])
+            if noise_type == "clean":
+                mix = y
+            elif noise_type in ("gwn", "GWN"):
+                y = y / max(y.max(), -y.min())
+                noise = gwn_for_audio(y, snr=np.random.normal(52,5))
+                mix = mix_2_sources(y, noise, *mix_settings[sub_clip_i])
+                mix = mix[:len(y)]
+            else:
+                raise ValueError("Unsupported noise_type %s" % noise_type)
             
-            example = serialize_example(samples[:,sub_clip_i], phns[:,sub_clip_i], win_length, hop_length, example_length)
+            example = serialize_example(mix, phns[:,sub_clip_i], win_length, hop_length, example_length)
         
             record_writer, next_record, num_examples = _update_record_writer(
                 record_writer=record_writer, next_record=next_record,
@@ -382,11 +393,12 @@ def build_phoneme_dataset_randomized(args, files, path):
         args_list.append({'files': files_chunk,
                           'output_dir': path,
                           'max_per_record': args.max_per_record,
-                          'text': '_clean_TIMIT_%.2d' % i,
+                          'text': '_%s_TIMIT_%.2d' % (args.noise_type, i),
                           'idx_offset': _idx_offset,
                           'win_length': args.win_length,
                           'hop_length': args.hop_length,
-                          'example_length': args.example_length
+                          'example_length': args.example_length,
+                          'noise_type': args.noise_type
         })
     
     print('Work scheduled, starting now...')

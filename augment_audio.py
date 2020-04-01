@@ -15,7 +15,7 @@ import pydub
 import pyroomacoustics as pra
 import scipy.fftpack
 
-from util.ft import normalize_0_1
+from util.ft import normalize_0_1, dct_filters
 
 import pdb
 
@@ -268,8 +268,6 @@ def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_
     output[:,1] *= k*loudness
     return output, labs
     
-    
-
 def get_chunk(samples, chunk):
     return np.array(samples[chunk[0]:chunk[1]])
 
@@ -291,6 +289,13 @@ def augment_audio_two_negatives(n_file1, n_file2, silence, loudness):
     output[:,1] *= k*loudness
 
     return output, labs
+
+def gwn_for_audio(y, snr=65.0):
+    """Gaussian White Noise.
+    """
+    gwn_power = np.sqrt((y**2).mean()) / snr
+    gwn = np.random.normal(0,gwn_power,len(y))
+    return gwn
 
 # Audio mixing with room sim constants
 standing_height = 1.65
@@ -361,10 +366,11 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     
     return spec
 
-def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
+def samples2mfcc(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
     """Like in deep-voice-conversion
     (Which only uses mfcc)
     """
+    
     samples = librosa.effects.preemphasis(samples, coef=0.97)
     
     mag = np.abs(librosa.core.stft(samples,
@@ -376,15 +382,18 @@ def samples2feature(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfc
     mel = np.dot(mel_basis, mag)
     
     mel_db = librosa.amplitude_to_db(mel)
-    # mfccs = dct(mel_db, n=n_mfcc)
-    # return mfccs
+    mfccs = np.dot(dct_filters(n_mfcc, n_mels), mel_db)
     
-    # normalize mel only
-    mel_db = normalize_0_1(mel_db, -55, 35)
-    
-    height = n_mels
+    height = n_mfcc
     width = len(samples) // hop_length
-    out = mel_db[-height:,-width:] # border effect is visible in first 2 columns in width
+    
+    out = mfccs[-height:,-width:]
     
     return out
+    
+    # if we were to output mel instead:
+    # normalize mel only
+    # mel_db = normalize_0_1(mel_db, -55, 35)
+    # out = mel_db[-height:,-width:] # border effect is visible in first 2 columns in width
+    # return out
     
