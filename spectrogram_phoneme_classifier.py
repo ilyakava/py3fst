@@ -13,21 +13,28 @@ from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import amazon_net
+from networks.spectrogram_networks import CBHG_net, CBHBG_net, CBHBH_net
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn
 
 import pdb
 
 sr = 16000
 
+network_dict = {
+    'CBHG': CBHG_net,
+    'CBHBG': CBHBG_net,
+    'CBHBH': CBHBH_net
+}
+HAS_BOTTLENECK = ('CBHBG', 'CBHBH')
+
 def train(args):
-    network = amazon_net
+    network = network_dict[args.network_type]
     bs = args.batch_size
     phn2idx, idx2phn, phns = load_vocab()
     n_classes = len(phns)
     spec_h = args.feature_height
-    spec_w = args.tfrecord_example_length // args.hop_length
-    spec_cut_w = args.network_example_length // args.hop_length
+    spec_w = args.tfrecord_feature_width
+    spec_cut_w = args.network_feature_width
         
     train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
     eval_parser = partial(parser, h=spec_h, w=spec_cut_w)    
@@ -36,9 +43,9 @@ def train(args):
     
     # Define the model function (following TF Estimator Template)
     def model_fn(features, labels, mode):
-        # downsample by 2 here b/c that's what happens in the network
-        if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
-            labels = labels[:,::2]
+        if args.network_type in HAS_BOTTLENECK:
+            if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
+                labels = labels[:,::2]
     
         # Build the neural network
         # Because Dropout have different behavior at training and prediction time, we
@@ -112,18 +119,35 @@ def train(args):
         return estim_specs
     
     ###############################
+    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
 
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
+    
+    # Eval Spec, save automatically
+    def _acc_higher(best_eval_result, current_eval_result):
+        key = 'phoneme_accuracy'
+        return best_eval_result[key] < current_eval_result[key]
+    acc_exporter = tf.estimator.BestExporter(
+        name="best_acc_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=3,
+        compare_fn=_acc_higher)
+    loss_exporter = tf.estimator.BestExporter(
+      name="best_loss_exporter",
+      serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+      exports_to_keep=3)
+    exporters = [acc_exporter, loss_exporter]
     # 45 steps at example_length=19840 is 1 hour
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45, exporters=exporters)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
+    # just eval
     # model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
     
-    # saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
+    # just save
     # model.export_savedmodel(args.model_root, saved_model_serving_input_receiver_fn)
 
 
@@ -137,14 +161,13 @@ def main():
                     help='...')
     parser.add_argument('--hop_length', default=sr//100, type=int,
                         help='... Becomes the frame size (One frame per this many audio samples).')
-    parser.add_argument('--tfrecord_example_length', default=80000, type=int,
-                        help='This is the number of samples in the examples in the tf.record. It should be a multiple of hop_length.')
-    parser.add_argument('--network_example_length', default=19840, type=int,
-        help='This is the number of samples that should be used when input' + \
-        ' into the network. It should be a multiple of hop_length.' + \
-        ' Length / hop_length = num contexts * context chunk size')
-    parser.add_argument('--feature_height', default=80, type=int,
+    parser.add_argument('--tfrecord_feature_width', default=601, type=int,
+                        help='This is the width of the 2D features in the train tf.record.')
+    parser.add_argument('--network_feature_width', default=401, type=int,
+        help='This is the width of the 2D features that should be fed to the network.')
+    parser.add_argument('--feature_height', default=40, type=int,
                     help='...')
+    parser.add_argument('--network_type', default='CBHBH', help='...')
 
     args = parser.parse_args()
 

@@ -12,7 +12,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import amazon_net
+from networks.spectrogram_networks import CBHBH_net
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn
 
 import pdb
@@ -20,7 +20,7 @@ import pdb
 sr = 16000
 
 def train(args):
-    network = amazon_net
+    network = CBHBH_net
     bs = args.batch_size
     n_classes = 1
     spec_h = args.feature_height
@@ -34,9 +34,17 @@ def train(args):
     
     # Define the model function (following TF Estimator Template)
     def model_fn(features, labels, mode):
-        # downsample by 2 here b/c that's what happens in the network
+
+        detection_labels = None
         if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
+            # starts with a zero and ends with a zero and has a 1 in it
+            istarget = (1-labels[:,0]) * (1-labels[:,-1]) * tf.reduce_max(labels, axis=1)
+            # downsample by 2 here b/c that's what happens in the network
             labels = labels[:,::2]
+            # idea is that the detection should only happen if the entire word
+            # is present
+            detection_labels = labels * tf.expand_dims(istarget, -1)
+            
     
         # Build the neural network
         # Because Dropout have different behavior at training and prediction time, we
@@ -56,14 +64,15 @@ def train(args):
     
         # Define loss and optimizer
         loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-            logits=tf.reshape(logits_train, [-1]), labels=tf.cast(tf.reshape(labels, [-1]), dtype=tf.float32)))
+            logits=tf.reshape(logits_train, [-1]), labels=tf.cast(tf.reshape(detection_labels, [-1]), dtype=tf.float32)))
         optimizer = tf.train.AdamOptimizer(learning_rate=args.lr)
         train_op = optimizer.minimize(loss_op,
                                       global_step=tf.train.get_global_step())
     
         # Evaluate the accuracy of the masks
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-        myevalops = {'mask_accuracy': acc_op}
+        acc2_op = tf.metrics.accuracy(labels=detection_labels, predictions=pred_classes)
+        myevalops = {'mask_accuracy': acc_op, 'detection_accuracy': acc2_op}
         eval_hooks = []
         
         # show masks that are being made
@@ -81,21 +90,23 @@ def train(args):
         # image-ify the features
         img_hat = get_image_summary(pred_probas)
         spec_h = args.feature_height # could cut off higher half frequencies here
-        # log_specs = tf.log(features)
+        
         summary_specs = features['spectrograms']
+        summary_specs = tf.log(1 + summary_specs)
         bm = tf.reduce_min(summary_specs, (1,2), keepdims=True)
         bM = tf.reduce_max(summary_specs, (1,2), keepdims=True)
         img_specs = (summary_specs - bm) / (bM - bm)
         img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
         img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
-        img_compare = tf.concat([img_hat, img_gt, img_specs], axis=1)
+        img_gt_clip = get_image_summary(tf.cast(detection_labels, dtype=tf.float32))
+        img_compare = tf.concat([img_hat, img_gt, img_gt_clip, img_specs], axis=1)
         tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
         
         
         # reduce across time
         clip_probas = tf.reduce_mean(pred_probas, axis=1)
         # clip_probas = tf.clip_by_value(clip_probas, 0, 1)
-        clip_gt = tf.reduce_max(labels, axis=1)
+        clip_gt = tf.reduce_max(detection_labels, axis=1)
         threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
         for sensitivity in threshes:
             myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
@@ -121,6 +132,8 @@ def train(args):
         return estim_specs
     
     ###############################
+    
+    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
 
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
@@ -135,7 +148,6 @@ def train(args):
     
     
     
-    # saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
     # model.export_savedmodel(args.model_root, saved_model_serving_input_receiver_fn)
 
 
