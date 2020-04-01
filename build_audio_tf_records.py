@@ -27,7 +27,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
-from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam, augment_audio_two_negatives
+from augment_audio import augment_audio, extract_example, samples2feature, samples2spectrogam, augment_audio_two_negatives, mix_2_sources
 
 import pdb
 
@@ -38,13 +38,23 @@ sr = 16000
 pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
 silence_1_opts = np.arange(-0.1, 0.2, 0.05).tolist()
 silence_2_opts = np.arange(-0.1, 0.2, 0.05).tolist()
-loudness_opts = [0.75,1.0,1.25]
+loudness_opts = [1.0]
 positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
 lengths_ms = np.arange(0.4,0.9,0.05)
 lengths_probabilities = np.array([16, 31, 80, 73, 76, 46, 26, 12, 4])
 lengths_probabilities = lengths_probabilities / lengths_probabilities.sum()
 
+# large room, small room
+bedroom = [4.9, 3.6, 3.5]
+large_livingroom = [8.5, 6.7, 3.5]
+room_dim_opts = [bedroom, large_livingroom]
+# absorption big/small
+room_absorption_opts = [0.1,0.8,0.9,1.0] # prefer non-echoey rooms
+# closeness of wakeword
+wakeword_to_mic_rel_distance_opts = [0.1,0.5,1.0]
+
+room_sim_opts = list(product(*[room_dim_opts, room_absorption_opts, wakeword_to_mic_rel_distance_opts]))
 
 
 parser = argparse.ArgumentParser()
@@ -165,6 +175,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
     for idx, p_file in enumerate(tqdm(p_files, desc='Positive Recordings Processed')):
         p_start_end = p_start_ends[idx]
         augment_settings = random.sample(positive_augment_opts, positive_multiplier)
+        mix_settings = random.sample(room_sim_opts, positive_multiplier)
         for j in range(positive_multiplier):
             # sample_id = idx + idx_offset
             
@@ -179,7 +190,10 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
                 print(sys.exc_info()[0])
                 continue
             
-            mix = output.mean(axis=1)
+            source1 = output[:,1]
+            source2 = output[:,[0,2]].mean(axis=1)
+            
+            mix = mix_2_sources(source1, source2, *mix_settings[j])
             
             n_tot_chunks = example_length // hop_length
             n_left_chunks = random.randint(n_tot_chunks//4, 3*n_tot_chunks//4)
@@ -205,7 +219,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             if output_negative_version:
                 _, silence, _, loudness = augment_settings[j]
                 output, labs = augment_audio_two_negatives(n_file, n_file, silence, loudness)
-                mix = output.mean(axis=1)
+                mix = mix_2_sources(output[:,0], output[:,1], *mix_settings[j])
                 samples = extract_example(mix, labs[0,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
                 samples_labs = np.zeros(example_length, dtype=int)
                 
