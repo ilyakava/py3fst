@@ -24,8 +24,8 @@ def train(args):
     bs = args.batch_size
     n_classes = 1
     spec_h = args.feature_height
-    spec_w = args.tfrecord_example_length // args.hop_length
-    spec_cut_w = args.network_example_length // args.hop_length
+    spec_w = args.tfrecord_feature_width
+    spec_cut_w = args.network_feature_width
         
     train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
     eval_parser = partial(parser, h=spec_h, w=spec_cut_w)    
@@ -78,7 +78,7 @@ def train(args):
         # show masks that are being made
         def get_image_summary(ts_lab):
             img_h = 5
-            img_w = args.network_example_length // args.hop_length
+            img_w = spec_cut_w
             # repeat twice
             ts_lab_rep2 = tf.tile(tf.expand_dims(ts_lab, -1),(1,1,2))
             ts_lab_rep2 = tf.reshape(ts_lab_rep2, [-1, img_w])
@@ -161,12 +161,10 @@ def main():
                     help='...')
     parser.add_argument('--hop_length', default=sr//100, type=int,
                         help='... Becomes the frame size (One frame per this many audio samples).')
-    parser.add_argument('--tfrecord_example_length', default=80000, type=int,
-                        help='This is the number of samples in the examples in the tf.record. It should be a multiple of hop_length.')
-    parser.add_argument('--network_example_length', default=19840, type=int,
-        help='This is the number of samples that should be used when input' + \
-        ' into the network. It should be a multiple of hop_length.' + \
-        ' Length / hop_length = num contexts * context chunk size')
+    parser.add_argument('--tfrecord_feature_width', default=80000//160, type=int,
+                        help='This is the width of the 2D features in the train tf.record.')
+    parser.add_argument('--network_feature_width', default=19840//160, type=int,
+        help='This is the width of the 2D features that should be fed to the network.')
     parser.add_argument('--feature_height', default=80, type=int,
                     help='...')
 
