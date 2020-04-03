@@ -6,7 +6,7 @@ Text-mode spectrogram using live microphone data from:
 https://python-sounddevice.readthedocs.io/en/0.3.15/examples.html#real-time-text-mode-spectrogram
 
 Usage:
-python spectrogram.py --model_dir /Users/ilyak/Downloads/spectrogram03.20.20/1584800014
+python stream_inference.py --model_dir /Users/ilyak/Downloads/spectrogram03.20.20/1584800014
 """
 
 import argparse
@@ -16,6 +16,7 @@ import sys
 from time import sleep, monotonic
 
 import cv2
+from librosa import amplitude_to_db, db_to_amplitude
 from librosa.filters import get_window
 from librosa.util import pad_center
 import numpy as np
@@ -87,7 +88,7 @@ def __draw_label(img, text, bg_color):
 #             gradient.append('\x1b[{};{}m{}'.format(fg, bg + 10, char))
 
 # samplerate = sd.query_devices(args.device, 'input')['default_samplerate']
-buffer_size_s = 5
+buffer_size_s = 10
 samplerate = 16000
 window_length = int(0.025 * samplerate)
 n_fft = 512
@@ -112,6 +113,12 @@ spec_buffer_p = 0
 fft_window = get_window('hann', window_length, fftbins=True)
 fft_window = pad_center(fft_window, n_fft)
 
+# normalize audio.
+# should match how network was trained.
+norm_win = get_window('hann', 5, fftbins=False)
+norm_win = norm_win / norm_win.sum()
+target_dBFS = -15.0
+
 columns = 80
 
 
@@ -123,18 +130,28 @@ def update_spectrogram(indata, frames, time, status):
         print('\x1b[34;40m', text.center(columns, '#'),
               '\x1b[0m', sep='')
     if any(indata):
+        
+        indata = np.array(indata[:,0])
+
+        cur_dBFS = np.convolve(indata, norm_win, 'same').max()
+        a = 10**( (target_dBFS-cur_dBFS) / 20.0 )
+        normed_indata = a * indata
         if samples_buffer_p < (samples_buffer_nblocks - 1):
             print('buffering' + ('.'*samples_buffer_p))
             ss = samples_buffer_p * samples_buffer_block_size
             se = (samples_buffer_p + 1) * samples_buffer_block_size
-            samples_buffer[ss:se] = indata[:, 0]
+            samples_buffer[ss:se] = normed_indata
             samples_buffer_p += 1
         elif samples_buffer_p == (samples_buffer_nblocks - 1):
             ss = samples_buffer_p * samples_buffer_block_size
             se = (samples_buffer_p + 1) * samples_buffer_block_size
-            samples_buffer[ss:se] = indata[:, 0]
+            samples_buffer[ss:se] = normed_indata
             # fft
             magnitude = np.abs(np.fft.rfft(fft_window * samples_buffer[-n_fft:], n=n_fft))
+            #
+            mag_db = amplitude_to_db(magnitude)
+            mag_db = np.clip(mag_db, -55, 65)
+            magnitude = db_to_amplitude(mag_db)
             
             # primary write
             write_idx = (spec_buffer_p % spec_buffer_w)
