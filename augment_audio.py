@@ -250,7 +250,6 @@ def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_
       overlap_2: silence in ms between wakeword and speech after wakeword, if negative there is overlap
       pitch_shift: octaves to shift, can be float, -3..+3 is a reasonable range
     """
-    
     wakeword_samples, _ = sf.read(p_file)
     wakeword = Clip(wakeword_samples, *p_start_end)
     wakeword = time_stretch_to_target(wakeword, target_len=p_duration, sr=sr, tolerance=0.05)
@@ -304,7 +303,7 @@ speaker_height = standing_height # no big difference
 table_height = 0.75
 dist_to_wall = 0.6 # 0.3 is one foot
 
-def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_rel_distance):
+def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_rel_distance, source2_to_mic_rel_distance=0.5):
     """Use a room sim to mix two sources of audio.
     
     Room Arrangement:
@@ -336,6 +335,7 @@ def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_re
     mic_pos = np.array([room_dim[1]/2, room_dim[0], table_height])
     
     pos1 = (1-source1_to_mic_rel_distance)*mic_pos + source1_to_mic_rel_distance*pos1
+    pos2 = (1-source2_to_mic_rel_distance)*mic_pos + source2_to_mic_rel_distance*pos2
     
     room = pra.Room.from_corners(corners, fs=16000, absorption=room_absorption, max_order=5)
     room.extrude(height)
@@ -348,9 +348,44 @@ def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_re
     
     room.simulate()
     mono_room = np.mean(room.mic_array.signals, axis=0)
+    # rescale roomsim to max source, otherwise it is too quiet
+    mono_room *= max(source1.max(), source2.max()) / mono_room.max()
     return mono_room
 
+def dBFS(signal):
+    """
+    signal is between -1,1
+    """
+    return 20*np.log10(np.sqrt((signal ** 2).mean()))
+    
+def peak_windowed_dBFS(signal, rms_window=5):
+    win = librosa.filters.get_window('hann', rms_window, fftbins=False)
+    win = win / win.sum()
+    y = np.convolve(signal, win, 'same')
+    return dBFS(y.max())
+
+def scaling_for_dBFS_change(cur_dBFS, target_dBFS=-20.0):
+    """
+    Since dBFS can be calculated as a max, or max after
+    windowing.
+    
+    Returns:
+        a s.t. dBFS(a*signal) == dBFS(signal)
+            where dBFS could be measured as max dBFS in the (windowed) signal
+    """
+    
+    a = 10**( (target_dBFS-cur_dBFS) / 20.0 )
+    return a
+    
+def scale_to_peak_windowed_dBFS(signal, target_dBFS=-20.0, rms_window=5):
+    cur_dBFS = peak_windowed_dBFS(signal, rms_window)
+    a = scaling_for_dBFS_change(cur_dBFS, target_dBFS)
+    return a * signal
+
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
+    """
+    samples: 1-D array of values in range -1,1
+    """
     spec = np.abs(librosa.core.stft(samples,
         win_length=win_length,
         hop_length=hop_length,
