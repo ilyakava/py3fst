@@ -27,7 +27,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
-from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio
+from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio, scale_to_peak_windowed_dBFS
 
 import pdb
 
@@ -50,11 +50,9 @@ bedroom = [4.9, 3.6, 3.5]
 large_livingroom = [8.5, 6.7, 3.5]
 room_dim_opts = [bedroom, large_livingroom]
 # absorption small...big
-room_absorption_opts = [0.1,0.8,0.85,0.9,0.95,1.0] # prefer non-echoey rooms
-# far-ness of wakeword
-wakeword_to_mic_rel_distance_opts = [0.25,0.5,1.0]
+room_absorption_opts = np.arange(0.4,0.9,0.05) # prefer non-echoey rooms
 
-room_sim_opts = list(product(*[room_dim_opts, room_absorption_opts, wakeword_to_mic_rel_distance_opts]))
+room_sim_opts = list(product(*[room_dim_opts, room_absorption_opts]))
 
 
 parser = argparse.ArgumentParser()
@@ -116,6 +114,8 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     assert len(samples_label) == example_length, 'Length of samples_label is wrong, expected %i received %i.' % (example_length, len(samples_label))
     assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
     
+    samples = scale_to_peak_windowed_dBFS(samples, target_dBFS=-15.0, rms_window=5)
+    
     spec = samples2spectrogam(samples, win_length, hop_length)
     # spec = samples2mfcc(samples, win_length, hop_length)
     
@@ -134,7 +134,7 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     audio_feature = audio_segment.raw_data
 
     feature['audio'] = _bytes_feature(audio_feature)
-    feature['audio_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
+    feature['audio_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samples_label))
 
     # Create a Features message using tf.train.Example.
     example_proto = tf.train.Example(
@@ -176,7 +176,9 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
     for idx, p_file in enumerate(tqdm(p_files, desc='Positive Recordings Processed')):
         p_start_end = p_start_ends[idx]
         augment_settings = random.sample(positive_augment_opts, positive_multiplier)
-        mix_settings = random.sample(room_sim_opts, positive_multiplier)
+        room_dim, room_absorption = random.sample(room_sim_opts, 1)[0]
+        source2_distance = 0.5
+        source1_distance = np.clip(np.random.normal(source2_distance, 0.1), 0.1, 1.0)
         for j in range(positive_multiplier):
             # sample_id = idx + idx_offset
             
@@ -193,13 +195,14 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             
             source1 = output[:,1]
             source2 = output[:,[0,2]].mean(axis=1)
-            
-            mix = mix_2_sources(source1, source2, *mix_settings[j])
+
+            mix = mix_2_sources(source1, source2, room_dim, room_absorption, source1_distance, source2_distance)
             
             n_tot_chunks = example_length // hop_length
             n_left_chunks = random.randint(n_tot_chunks//4, 3*n_tot_chunks//4)
+            # n_left_chunks = n_tot_chunks // 2 # center wakeword in clip
             n_right_chunks = n_tot_chunks - n_left_chunks - 1 # left/right exclude the center chunk
-            samples = extract_example(mix, labs[1,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
+            samples = extract_example(mix, labs[1,0], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
             
             mix_labs = np.zeros(mix.shape, dtype=int)
             mix_labs[labs[0,1]:labs[1,1]] = 1
@@ -220,7 +223,8 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             if output_negative_version:
                 _, silence, _, loudness = augment_settings[j]
                 output, labs = augment_audio_two_negatives(n_file, n_file, silence, loudness)
-                mix = mix_2_sources(output[:,0], output[:,1], *mix_settings[j])
+                
+                mix = mix_2_sources(output[:,0], output[:,1], room_dim, room_absorption, source1_distance, source2_distance)
                 samples = extract_example(mix, labs[0,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
                 samples_labs = np.zeros(example_length, dtype=int)
                 
@@ -285,15 +289,19 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, te
         samples = frame(samples, frame_length=example_length, hop_length=example_hop)
         phns = frame(phns, frame_length=example_length, hop_length=example_hop)
         
-        mix_settings = random.sample(room_sim_opts, samples.shape[1])
         for sub_clip_i in range(samples.shape[1]):
-            y = np.array(samples[:,sub_clip_i])
+            y = np.array(samples[:,sub_clip_i], dtype=float)
             if noise_type == "clean":
                 mix = y
             elif noise_type in ("gwn", "GWN"):
-                y = y / max(y.max(), -y.min())
+                # y = y / max(y.max(), -y.min()) # helps noise
                 noise = gwn_for_audio(y, snr=np.random.normal(52,5))
-                mix = mix_2_sources(y, noise, *mix_settings[sub_clip_i])
+                
+                room_dim, room_absorption = random.sample(room_sim_opts, 1)[0]
+                source2_distance = 1.0
+                source1_distance = np.clip(np.random.normal(0.5, 0.1), 0.1, 1.0)
+                
+                mix = mix_2_sources(y, noise, room_dim, room_absorption, source1_distance, source2_distance)
                 mix = mix[:len(y)]
             else:
                 raise ValueError("Unsupported noise_type %s" % noise_type)
