@@ -12,10 +12,20 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import CBHBH_net
-from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn
+from networks.spectrogram_networks import CBHBH_net, amazon_net
+from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn, time_cut_centered_wakeword_parser
 
 import pdb
+
+# from: to
+pretrain_assignment_map = {
+    "CBHG/prenet/":"CBHBH/prenet/",
+    "CBHG/conv_bank_1d/":"CBHBH/conv_bank_1d/",
+    "CBHG/highwaynet_featextractor_0/":"CBHBH/highwaynet_featextractor_0/",
+    "CBHG/highwaynet_featextractor_1/":"CBHBH/highwaynet_featextractor_1/",
+    "CBHG/highwaynet_featextractor_2/":"CBHBH/highwaynet_featextractor_2/",
+    "CBHG/highwaynet_featextractor_3/":"CBHBH/highwaynet_featextractor_3/",
+}
 
 sr = 16000
 
@@ -27,6 +37,7 @@ def train(args):
     spec_w = args.tfrecord_feature_width
     spec_cut_w = args.network_feature_width
         
+    # train_parser = partial(time_cut_centered_wakeword_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)
     train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
     eval_parser = partial(parser, h=spec_h, w=spec_cut_w)    
     
@@ -43,7 +54,7 @@ def train(args):
             labels = labels[:,::2]
             # idea is that the detection should only happen if the entire word
             # is present
-            detection_labels = labels * tf.expand_dims(istarget, -1)
+            detection_labels = labels #* tf.expand_dims(istarget, -1)
             
     
         # Build the neural network
@@ -53,6 +64,9 @@ def train(args):
                                 is_training=True, n_classes=n_classes, args=args)
         logits_val = network(features, args.dropout, reuse=True,
                                 is_training=False, n_classes=n_classes, args=args)
+    
+        if args.pretrain_checkpoint is not None:
+            tf.train.init_from_checkpoint(args.pretrain_checkpoint, pretrain_assignment_map)
     
         # Predictions
         pred_probas = tf.math.sigmoid(logits_val)
@@ -138,8 +152,33 @@ def train(args):
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
+    # Eval Spec, save automatically
+    def _key_better(best_eval_result, current_eval_result, key, higher_is_better):
+        if higher_is_better:
+            return best_eval_result[key] < current_eval_result[key]
+        else:
+            return best_eval_result[key] > current_eval_result[key]
+    acc_exporter = tf.estimator.BestExporter(
+        name="best_acc_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1,
+        compare_fn=partial(_key_better, key='mask_accuracy', higher_is_better=True))
+    MRFA_exporter = tf.estimator.BestExporter(
+        name="MRFA_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1,
+        compare_fn=partial(_key_better, key='whole_clip/specificity_at_sensitivity_0.9700', higher_is_better=True))
+    loss_exporter = tf.estimator.BestExporter(
+        name="best_loss_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1)
+    latest_exporter = tf.estimator.LatestExporter(
+        name="latest_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1)
+    exporters = [MRFA_exporter, acc_exporter, loss_exporter, latest_exporter]
     # 45 steps at example_length=19840 is 1 hour
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45, exporters=exporters)
     
     if args.eval_only:
         model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
@@ -167,6 +206,8 @@ def main():
         help='This is the width of the 2D features that should be fed to the network.')
     parser.add_argument('--feature_height', default=80, type=int,
                     help='...')
+    parser.add_argument('--pretrain_checkpoint', default=None, type=str,
+                    help='Looks like: model_root/model.ckpt-0 or model_root/export/best_acc_exporter/1585776862/variables/variables')
 
     args = parser.parse_args()
     

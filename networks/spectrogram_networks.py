@@ -43,25 +43,29 @@ def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, args):
     num_highway_blocks = 4
     norm_type = 'ins'
     
-    with tf.variable_scope('amazon_net', reuse=reuse):
+    with tf.variable_scope('CBHG', reuse=reuse):
         x = x_dict['spectrograms']
         x = tf.reshape(x, (-1,spec_h,spec_w))
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
-        out = prenet(out, hidden_units, is_training, dropout)
-        out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = prenet(out, hidden_units, is_training, dropout)
+        with tf.variable_scope('conv_bank_1d', reuse=reuse):
+            out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
         
         # highway
         for i in range(4):
             out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
         
         # gru
-        out = gru(out, hidden_units, True)  # (N, T, E)
+        with tf.variable_scope('gru', reuse=reuse):
+            out = gru(out, hidden_units, True)  # (N, T, E)
                    
         # get classification
-        out = tf.layers.dense(out, n_classes)
-        if n_classes == 1:
-            out = tf.squeeze(out, axis=2) # [-1, t//2]
+        with tf.variable_scope('classification', reuse=reuse):
+            out = tf.layers.dense(out, n_classes)
+            if n_classes == 1:
+                out = tf.squeeze(out, axis=2) # [-1, t//2]
 
     return out
     
@@ -117,13 +121,15 @@ def CBHBH_net(x_dict, dropout, reuse, is_training, n_classes, args):
     
     bottleneck_size = hidden_units // 2
     
-    with tf.variable_scope('amazon_net', reuse=reuse):
+    with tf.variable_scope('CBHBH', reuse=reuse):
         x = x_dict['spectrograms']
         x = tf.reshape(x, (-1,spec_h,spec_w))
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
-        out = prenet(out, hidden_units, is_training, dropout)
-        out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = prenet(out, hidden_units, is_training, dropout)
+        with tf.variable_scope('conv_bank_1d', reuse=reuse):
+            out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
         
         # highway
         for i in range(4):
@@ -145,6 +151,48 @@ def CBHBH_net(x_dict, dropout, reuse, is_training, n_classes, args):
         if n_classes == 1:
             out = tf.squeeze(out, axis=2) # [-1, t//2]
 
+    return out
+
+def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    """
+    spec_h = args.feature_height # ~freq
+    spec_w = args.network_feature_width # time
+    
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    num_highway_blocks = 4
+    norm_type = 'ins'
+    
+    bottleneck_size = hidden_units // 2
+    
+    with tf.variable_scope('amazon_net', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        out = tf.transpose(x, [0,2,1]) # batch, time, depth
+
+        out = prenet(out, hidden_units, is_training, dropout)
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # [-1, t, C]
+        out = tf.reshape(out, [-1, spec_w // 2, bottleneck_size*2])
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=2) # [-1, t//2]
     return out
 
 def st_net_v1(x, dropout, reuse, is_training, n_classes, args):

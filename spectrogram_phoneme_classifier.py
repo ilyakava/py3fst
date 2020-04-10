@@ -132,13 +132,17 @@ def train(args):
     acc_exporter = tf.estimator.BestExporter(
         name="best_acc_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
-        exports_to_keep=3,
+        exports_to_keep=1,
         compare_fn=_acc_higher)
     loss_exporter = tf.estimator.BestExporter(
-      name="best_loss_exporter",
-      serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
-      exports_to_keep=3)
-    exporters = [acc_exporter, loss_exporter]
+        name="best_loss_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1)
+    latest_exporter = tf.estimator.LatestExporter(
+        name="latest_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1)
+    exporters = [acc_exporter, loss_exporter, latest_exporter]
     # 45 steps at example_length=19840 is 1 hour
     eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45, exporters=exporters)
     
