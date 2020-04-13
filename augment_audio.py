@@ -3,7 +3,7 @@
 Most code assumes 16kHz sampling rate.
 """
 
-from collections import namedtuple
+import random
 
 import soundfile as sf
 from pyrubberband import pyrb
@@ -14,12 +14,14 @@ import numpy as np
 import pydub
 import pyroomacoustics as pra
 import scipy.fftpack
+from scipy.signal import argrelextrema
 
 from util.ft import normalize_0_1, dct_filters
 
 import pdb
 
 sr=16000
+DEFAULT_DB = -15.0
 
 # struct for audio content. Main idea is that content is between start and end
 # but leading/trailing audio is present in samples.
@@ -38,6 +40,9 @@ class Clip(object):
         self.start = start
         self.end = end
         assert start >= 0 and end <= len(samples), 'Content must be within clip'
+    
+    def __len__(self):
+        return len(self.samples)
 
 def filter_for_speech(samples, sr=sr):
     """Filters np.array of samples with speech bandpass filter.
@@ -94,7 +99,8 @@ def extract_other_speech_padding(samples_bg, length=80000):
     
 def align_three(source_a, source_b, source_c, b_delay=0, c_delay=0):
     """
-    Makes a multitrack np.array of the samples in 3 sources.
+    Makes a multitrack np.array of the samples in 3 sources while paying
+    attention to padding.
     
     
     Args:
@@ -242,7 +248,21 @@ def time_stretch_to_target(clip, target_len=0.550, sr=sr, tolerance=0.05):
 
 def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_1, silence_2, loudness):
     """
-    Does everything but extraction. Outputs multiple channels.
+    Modifies the wakeword, surrounds it with n_file audio. Outputs multiple channels.
+    Does not extract.
+    
+    Should be used with extract_example like so:
+    
+        n_tot_chunks = example_length // hop_length
+        n_left_chunks = random.randint(n_tot_chunks//4, 3*n_tot_chunks//4)
+        # n_left_chunks = n_tot_chunks // 2 # center wakeword in clip
+        n_right_chunks = n_tot_chunks - n_left_chunks - 1 # left/right exclude the center chunk
+        samples = extract_example(mix, labs[1,0], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
+        
+        mix_labs = np.zeros(mix.shape, dtype=int)
+        mix_labs[labs[0,1]:labs[1,1]] = 1
+        samples_labs = extract_example(mix_labs, labs[1,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
+
     
     Args:
       p_duration: in ms
@@ -265,6 +285,75 @@ def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_
     k = (get_power(lead)+get_power(trail)) / (2*get_power(wakeword))
     
     output[:,1] *= k*loudness
+    return output, labs
+    
+def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shift, example_length, silence_max=0.6, silence_min=0.1, target_dBFS=DEFAULT_DB):
+    """
+    Modifies the wakeword, surrounds it with n_file audio words. Outputs multiple channels.
+    Does not extract.
+    
+    Args:
+      p_duration: in ms
+      silence_max/min: max/min silence in ms between speech segments, if negative there is overlap
+      
+      pitch_shift: octaves to shift, can be float, -3..+3 is a reasonable range
+    """
+    wakeword_samples, _ = sf.read(p_file)
+    wakeword = Clip(wakeword_samples, *p_start_end)
+    wakeword = time_stretch_to_target(wakeword, target_len=p_duration, sr=sr, tolerance=0.05)
+    wakeword = Clip(pyrb.pitch_shift(wakeword.samples, sr=sr, n_steps=pitch_shift), wakeword.start, wakeword.end)
+    
+    # to really match the volume neded to scale within the duration of the word
+    cur_dBFS = peak_windowed_dBFS(wakeword.samples[wakeword.start:wakeword.end])
+    a = scaling_for_dBFS_change(cur_dBFS, target_dBFS)
+    wakeword = Clip(a*wakeword.samples, wakeword.start, wakeword.end)
+    
+    samples_other_speech, _ = sf.read(n_file)
+    
+    # the modified signal should only be used to get intervals
+    filtered_oth = filter_for_speech(samples_other_speech)
+    normed_oth = scale_to_peak_windowed_dBFS(filtered_oth, target_dBFS=DEFAULT_DB)
+    intervals = wordlike_split(normed_oth)
+    
+    output = np.zeros((example_length,3))
+    labs = np.zeros((example_length,3))
+    t = 0
+    inserted_wakeword = False
+    interval_p = 0
+    silence_last = False
+    while t < example_length and interval_p < len(intervals):
+        intvs, intve = intervals[interval_p]
+        intv_len = intve - intvs
+        # first insert silence
+        if not silence_last:
+            t += int(np.random.uniform(silence_min, silence_max) * sr)
+            silence_last = True
+        # flip a coin to see if wakeword should be inserted
+        # the probability should be 1 by the last second
+        insert_wakeword = random.random() < (t/max(1, example_length - sr))
+        if not inserted_wakeword and insert_wakeword:
+            # wakeword has padding
+            ds = max(0,t - wakeword.start)
+            ss = max(0,ds + wakeword.start - t)
+            de = min(len(wakeword) - wakeword.start + t, example_length)
+            se = min(de - t + wakeword.start, len(wakeword))
+            
+            output[ds:de,1] = wakeword.samples[ss:se]
+            labs[t:(t + wakeword.end - wakeword.start),1] = 1
+            silence_last = False
+            inserted_wakeword = True
+            t += wakeword.end - wakeword.start
+        elif t + intv_len < example_length:
+            insert = scale_to_peak_windowed_dBFS(samples_other_speech[intvs:intve], target_dBFS=target_dBFS)
+            track_idx = int(inserted_wakeword)*2
+            output[t:(t+intv_len),track_idx] = (insert - insert.mean())
+            labs[t:(t+intv_len),track_idx] = 1
+            interval_p += 1
+            silence_last = False
+            t += intv_len
+        else:
+            interval_p += 1
+            
     return output, labs
     
 def get_chunk(samples, chunk):
@@ -303,7 +392,7 @@ speaker_height = standing_height # no big difference
 table_height = 0.75
 dist_to_wall = 0.6 # 0.3 is one foot
 
-def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_rel_distance, source2_to_mic_rel_distance=0.5):
+def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_rel_distance, source2_to_mic_rel_distance=0.5, target_dBFS=DEFAULT_DB):
     """Use a room sim to mix two sources of audio.
     
     Room Arrangement:
@@ -348,8 +437,7 @@ def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_re
     
     room.simulate()
     mono_room = np.mean(room.mic_array.signals, axis=0)
-    # rescale roomsim to max source, otherwise it is too quiet
-    mono_room *= max(source1.max(), source2.max()) / mono_room.max()
+    mono_room = scale_to_peak_windowed_dBFS(mono_room, target_dBFS)
     return mono_room
 
 def dBFS(signal):
@@ -358,13 +446,17 @@ def dBFS(signal):
     """
     return 20*np.log10(np.sqrt((signal ** 2).mean()))
     
+def todB(y):
+    # 20*np.log10(np.sqrt(( y )))
+    return librosa.core.power_to_db(y)
+    
 def peak_windowed_dBFS(signal, rms_window=5):
     win = librosa.filters.get_window('hann', rms_window, fftbins=False)
     win = win / win.sum()
     y = np.convolve(signal, win, 'same')
     return dBFS(y.max())
 
-def scaling_for_dBFS_change(cur_dBFS, target_dBFS=-20.0):
+def scaling_for_dBFS_change(cur_dBFS, target_dBFS=DEFAULT_DB):
     """
     Since dBFS can be calculated as a max, or max after
     windowing.
@@ -377,10 +469,100 @@ def scaling_for_dBFS_change(cur_dBFS, target_dBFS=-20.0):
     a = 10**( (target_dBFS-cur_dBFS) / 20.0 )
     return a
     
-def scale_to_peak_windowed_dBFS(signal, target_dBFS=-20.0, rms_window=5):
+def scale_to_peak_windowed_dBFS(signal, target_dBFS=DEFAULT_DB, rms_window=5):
     cur_dBFS = peak_windowed_dBFS(signal, rms_window)
     a = scaling_for_dBFS_change(cur_dBFS, target_dBFS)
     return a * signal
+
+def segments_from_loc_minmax(local_maxima, local_minima):
+    """
+    For each local maxima M, outputs a segment that is a:b where
+    a = local minima right before M and b =  local minima right
+    after M.
+    """
+    min_p = 0
+    max_p = 0
+    # start with a max that has a min to the left
+    while local_minima[min_p] > local_maxima[max_p]:
+        max_p += 1
+
+    def ff_max(max_p):
+        # get max just ahead of current min
+        while max_p < (len(local_maxima) ) and min_p < len(local_minima) and (local_minima[min_p] > local_maxima[max_p]):
+            max_p += 1
+        return max_p
+    
+    def ff_min(min_p):
+        # get min closest and before to current max
+        while min_p < (len(local_minima) -1 ) and (local_minima[min_p+1] < local_maxima[max_p]):
+            min_p += 1
+        return min_p
+    
+    intervals = []
+    while max_p < len(local_maxima) and min_p < len(local_minima):
+        min_p = ff_min(min_p)
+        if min_p < (len(local_minima) - 1):
+            intervals.append([local_minima[min_p], local_minima[min_p+1]])
+        min_p += 1
+        max_p = ff_max(max_p)
+        
+    return intervals
+
+def wordlike_split(samples, frame_length=1600, hop_length=400, min_length_s=0.35, max_length_s=1.2):
+    """
+    preceding with filter_for_speech and normalization helps.
+    """
+    win = librosa.filters.get_window('hann', frame_length, fftbins=False)
+    win = win / win.sum()
+    y = np.convolve( np.power(samples, 2), win, 'same')
+    
+    speech_db = todB(y)
+    
+    # negative numbers, could be -30, and -45. But median is adaptive and works
+    # best even when normalizing audio with scale_to_peak_windowed_dBFS
+    top_db = np.median(speech_db)
+    low_db = np.median(speech_db)
+    
+    local_minima = argrelextrema(speech_db, np.less, order=1)[0]
+    local_maxima = argrelextrema(speech_db, np.greater, order=1)[0]
+    
+    quiet_loc = []
+    for idx in local_minima:
+        if speech_db[idx] < low_db:
+            quiet_loc.append(idx)
+    loud_loc = []
+    for idx in local_maxima:
+        if speech_db[idx] > top_db:
+            loud_loc.append(idx)
+    quiet_loc = [0] + quiet_loc + [len(quiet_loc)-1]
+    
+    intervals = segments_from_loc_minmax(loud_loc, quiet_loc)
+    
+    # concatenate neighboring ones if too short and close together
+    p_ = 0
+    while p_ < len(intervals):
+        curr = intervals[p_]
+        if (curr[1] - curr[0])/sr > max_length_s:
+            # too long, throw away
+            intervals.pop(p_)
+        elif (curr[1] - curr[0])/sr < min_length_s:
+            # too short, concat with next if ok
+            if p_ < (len(intervals) - 1) and intervals[p_+1][0] - curr[1] < 0.05*sr:
+                next_ = intervals.pop(p_+1)
+                intervals[p_][1] = next_[1]
+            else:
+                intervals.pop(p_)
+        else:
+            # is fine, continue
+            p_ += 1
+            
+    # sort by quietest silence
+    intervals = sorted(intervals, key=lambda pair: speech_db[pair[0]] + speech_db[pair[1]])
+    
+    return intervals
+
+    
+
 
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     """

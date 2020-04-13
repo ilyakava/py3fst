@@ -27,7 +27,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
-from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio, scale_to_peak_windowed_dBFS
+from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words
 
 import pdb
 
@@ -175,40 +175,36 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
 
     for idx, p_file in enumerate(tqdm(p_files, desc='Positive Recordings Processed')):
         p_start_end = p_start_ends[idx]
-        augment_settings = random.sample(positive_augment_opts, positive_multiplier)
-        room_dim, room_absorption = random.sample(room_sim_opts, 1)[0]
-        source2_distance = 0.5
-        source1_distance = np.clip(np.random.normal(source2_distance, 0.1), 0.1, 1.0)
         for j in range(positive_multiplier):
             # sample_id = idx + idx_offset
             
             n_file = n_files[idx*positive_multiplier + j]
             
             rand_p_duration = lengths_ms[np.random.multinomial(1, lengths_probabilities).tolist().index(1)]
+            rand_pitch_shift = random.choice(pitch_shift_opts)
             
             try:
-                output, labs = augment_audio(p_file, p_start_end, n_file, rand_p_duration, *augment_settings[j])
+                output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, rand_pitch_shift, example_length)
+                
+                source1 = output.mean(axis=1)
+                keyword = labs[:,1]
+                voice = np.clip(labs[:,0] + labs[:,2], 0, 1)
+                samples_labs = (keyword - voice).astype(int)
+                
+                snr = np.clip(np.random.normal(20,5), 10, 100)
+                source2 = gwn_for_audio(source1, snr=snr)
+                room_dim, room_absorption = random.sample(room_sim_opts, 1)[0]
+                source2_distance = 1.0
+                source1_distance = np.clip(np.random.normal(0.5, 0.1), 0.1, 1.0)
+                
+                mix = mix_2_sources(source1, source2, room_dim, room_absorption, source1_distance, source2_distance, target_dBFS=-15.0)
+                mix = mix[:example_length]
+                
+                example = serialize_example(mix, samples_labs, win_length, hop_length, example_length)
             except:
                 print("Error augmenting inputs %s, %s:" % (p_file, n_file))
                 print(sys.exc_info()[0])
                 continue
-            
-            source1 = output[:,1]
-            source2 = output[:,[0,2]].mean(axis=1)
-
-            mix = mix_2_sources(source1, source2, room_dim, room_absorption, source1_distance, source2_distance)
-            
-            n_tot_chunks = example_length // hop_length
-            n_left_chunks = random.randint(n_tot_chunks//4, 3*n_tot_chunks//4)
-            # n_left_chunks = n_tot_chunks // 2 # center wakeword in clip
-            n_right_chunks = n_tot_chunks - n_left_chunks - 1 # left/right exclude the center chunk
-            samples = extract_example(mix, labs[1,0], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
-            
-            mix_labs = np.zeros(mix.shape, dtype=int)
-            mix_labs[labs[0,1]:labs[1,1]] = 1
-            samples_labs = extract_example(mix_labs, labs[1,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
-
-            example = serialize_example(samples, samples_labs, win_length, hop_length, example_length)
             
             record_writer, next_record, num_examples = _update_record_writer(
                 record_writer=record_writer, next_record=next_record,
@@ -218,28 +214,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             if counter:
                 with counter.get_lock():
                     counter.value += 1
-            
-            # add purely negative example also
-            if output_negative_version:
-                _, silence, _, loudness = augment_settings[j]
-                output, labs = augment_audio_two_negatives(n_file, n_file, silence, loudness)
-                
-                mix = mix_2_sources(output[:,0], output[:,1], room_dim, room_absorption, source1_distance, source2_distance)
-                samples = extract_example(mix, labs[0,1], example_length=example_length, n_right_chunks=n_right_chunks, n_left_chunks=n_left_chunks)
-                samples_labs = np.zeros(example_length, dtype=int)
-                
-                example = serialize_example(samples, samples_labs, win_length, hop_length, example_length)
-            
-                record_writer, next_record, num_examples = _update_record_writer(
-                    record_writer=record_writer, next_record=next_record,
-                    num_examples=num_examples, output_dir=output_dir,
-                    max_per_record=max_per_record, text=text)
-                record_writer.write(example)
-                if counter:
-                    with counter.get_lock():
-                        counter.value += 1
-                
-
+                    
     record_writer.close()
 
 def _build_tf_records_from_phoneme_dataset_wrapper(kwargs):
@@ -459,13 +434,13 @@ def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
     source_files = list(metadata.keys())
 
     # dir per speaker
-    dirs = np.array(list(set([path.split('/')[0] for path in source_files])))
-    idxs = list(range(len(dirs)))
+    all_speakers = np.array(list(set([path.split('/')[0] for path in source_files])))
+    idxs = list(range(len(all_speakers)))
     random.shuffle(idxs)
     
     n_train = int(percentage_train * len(idxs))
-    train_dirs = dirs[idxs[:n_train]]
-    val_dirs = dirs[idxs[n_train:]]
+    train_speakers = all_speakers[idxs[:n_train]]
+    val_speakers = all_speakers[idxs[n_train:]]
     
     train_files = []
     val_files = []
@@ -473,9 +448,9 @@ def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
     for path in source_files:
         speaker = path.split('/')[0]
         full_path = os.path.join(args.positive_data_dir, path)
-        if speaker in train_dirs:
+        if speaker in train_speakers:
             train_files.append(full_path)
-        elif speaker in val_dirs:
+        elif speaker in val_speakers:
             val_files.append(full_path)
         else:
             raise ValueError("%s is neither in train nor val set" % path)
