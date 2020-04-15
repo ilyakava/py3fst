@@ -77,6 +77,7 @@ def CBHBG_net(x_dict, dropout, reuse, is_training, n_classes, args):
     hidden_units = 64
     num_highway_blocks = 4
     norm_type = 'ins'
+    bottleneck_size = hidden_units // 2
     
     with tf.variable_scope('amazon_net', reuse=reuse):
         x = x_dict['spectrograms']
@@ -193,6 +194,63 @@ def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
         out = tf.layers.dense(out, n_classes)
         if n_classes == 1:
             out = tf.squeeze(out, axis=2) # [-1, t//2]
+    return out
+    
+def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, args):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    """
+    spec_h = args.feature_height # ~freq
+    spec_w = args.network_feature_width # time
+    
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        out = tf.transpose(x, [0,2,1]) # batch, time, depth
+
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = prenet(out, hidden_units, is_training, dropout)
+        with tf.variable_scope('conv_bank_1d', reuse=reuse):
+            out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
     return out
 
 def st_net_v1(x, dropout, reuse, is_training, n_classes, args):

@@ -12,7 +12,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import CBHBH_net, amazon_net
+from networks.spectrogram_networks import CBHBH_net, amazon_net, Guo_Li_net
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn, time_cut_centered_wakeword_parser
 
 import pdb
@@ -30,12 +30,15 @@ pretrain_assignment_map = {
 sr = 16000
 
 def train(args):
-    network = CBHBH_net
+    network = Guo_Li_net
     bs = args.batch_size
-    n_classes = 1
+    n_classes = 3
     spec_h = args.feature_height
     spec_w = args.tfrecord_feature_width
     spec_cut_w = args.network_feature_width
+    
+    n_left = 20
+    n_right = 10
         
     # train_parser = partial(time_cut_centered_wakeword_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)
     train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
@@ -48,13 +51,13 @@ def train(args):
 
         detection_labels = None
         if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
-            # starts with a zero and ends with a zero and has a 1 in it
-            istarget = (1-labels[:,0]) * (1-labels[:,-1]) * tf.reduce_max(labels, axis=1)
-            # downsample by 2 here b/c that's what happens in the network
-            labels = labels[:,::2]
-            # idea is that the detection should only happen if the entire word
-            # is present
-            detection_labels = labels #* tf.expand_dims(istarget, -1)
+            labels = labels[:,n_left:-n_right]
+            
+            detection_labels = tf.maximum(0,labels)
+            
+            # this is what happens in the network
+            labels = labels + 1
+            
             
     
         # Build the neural network
@@ -69,16 +72,17 @@ def train(args):
             tf.train.init_from_checkpoint(args.pretrain_checkpoint, pretrain_assignment_map)
     
         # Predictions
-        pred_probas = tf.math.sigmoid(logits_val)
-        pred_classes = pred_probas > 0.5
+        pred_probas = tf.nn.softmax(logits_val)
+        pred_classes = tf.argmax(logits_val, axis=2)
+        prob_wake = pred_probas[:,:,2]
     
         # If prediction mode, early return
         if mode == tf.estimator.ModeKeys.PREDICT:
             return tf.estimator.EstimatorSpec(mode, predictions=pred_probas)
     
         # Define loss and optimizer
-        loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-            logits=tf.reshape(logits_train, [-1]), labels=tf.cast(tf.reshape(detection_labels, [-1]), dtype=tf.float32)))
+        loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            logits=logits_train, labels=labels))
         optimizer = tf.train.AdamOptimizer(learning_rate=args.lr)
         train_op = optimizer.minimize(loss_op,
                                       global_step=tf.train.get_global_step())
@@ -102,36 +106,35 @@ def train(args):
             return imgs
         
         # image-ify the features
-        img_hat = get_image_summary(pred_probas)
-        spec_h = args.feature_height # could cut off higher half frequencies here
+        # img_hat = get_image_summary(prob_wake)
+        # spec_h = args.feature_height # could cut off higher half frequencies here
         
-        summary_specs = features['spectrograms']
-        summary_specs = tf.log(1 + summary_specs)
-        bm = tf.reduce_min(summary_specs, (1,2), keepdims=True)
-        bM = tf.reduce_max(summary_specs, (1,2), keepdims=True)
-        img_specs = (summary_specs - bm) / (bM - bm)
-        img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
-        img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32))
-        img_gt_clip = get_image_summary(tf.cast(detection_labels, dtype=tf.float32))
-        img_compare = tf.concat([img_hat, img_gt, img_gt_clip, img_specs], axis=1)
-        tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
+        # summary_specs = features['spectrograms']
+        # summary_specs = tf.log(1 + summary_specs)
+        # bm = tf.reduce_min(summary_specs, (1,2), keepdims=True)
+        # bM = tf.reduce_max(summary_specs, (1,2), keepdims=True)
+        # img_specs = (summary_specs - bm) / (bM - bm)
+        # img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
+        # img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32) / 2.0)
+        # img_gt_clip = get_image_summary(tf.cast(detection_labels, dtype=tf.float32) / 3.0)
+        # img_compare = tf.concat([img_hat, img_gt, img_gt_clip, img_specs], axis=1)
+        # tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
         
         
         # reduce across time
-        clip_probas = tf.reduce_mean(pred_probas, axis=1)
-        # clip_probas = tf.clip_by_value(clip_probas, 0, 1)
+        clip_probas = tf.reduce_mean(prob_wake, axis=1)
         clip_gt = tf.reduce_max(detection_labels, axis=1)
         threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
         for sensitivity in threshes:
             myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
         
         # Create a SummarySaverHook
-        eval_summary_hook = tf.estimator.SummarySaverHook(
-                                        save_steps=1,
-                                        output_dir= args.model_root + "/eval",
-                                        summary_op=tf.summary.merge_all())
-        # Add it to the evaluation_hook list
-        eval_hooks.append(eval_summary_hook)
+        # eval_summary_hook = tf.estimator.SummarySaverHook(
+        #                                 save_steps=1,
+        #                                 output_dir= args.model_root + "/eval",
+        #                                 summary_op=tf.summary.merge_all())
+        # # Add it to the evaluation_hook list
+        # eval_hooks.append(eval_summary_hook)
         
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
