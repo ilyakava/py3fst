@@ -58,7 +58,7 @@ class MovingWindowPerf(MovingAvgPerf):
       fps = len(self.times) / (self.times[-1] - self.times[0])
     return '%.2f %s' % (fps, text)
 
-def __draw_label(img, text, bg_color):
+def __draw_label(img, text, bg_color, pos=(0,0)):
     font_face = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.4
     color = (0, 0, 0)
@@ -67,7 +67,7 @@ def __draw_label(img, text, bg_color):
 
     txt_size = cv2.getTextSize(text, font_face, scale, thickness)
 
-    pos = (5, int(txt_size[0][1]*2))
+    pos = (pos[0] + 5, pos[1] + int(txt_size[0][1]*2))
 
     end_x = pos[0] + txt_size[0][0] + margin
     end_y = pos[1] - txt_size[0][1] - margin
@@ -133,9 +133,9 @@ def update_spectrogram(indata, frames, time, status):
         
         indata = np.array(indata[:,0])
 
-        cur_dBFS = np.convolve(indata, norm_win, 'same').max()
-        a = 10**( (target_dBFS-cur_dBFS) / 20.0 )
-        normed_indata = a * indata
+        # cur_dBFS = np.convolve(indata, norm_win, 'same').max()
+        # a = 10**( (target_dBFS-cur_dBFS) / 20.0 )
+        normed_indata = indata
         if samples_buffer_p < (samples_buffer_nblocks - 1):
             print('buffering' + ('.'*samples_buffer_p))
             ss = samples_buffer_p * samples_buffer_block_size
@@ -188,6 +188,10 @@ def stream_spectrogram_of_microphone_audio(args):
                 break
 
 def stream_inference_of_microphone_audio(args):
+    """
+    The spectrum sits in a buffer with width spec_buffer_pad + spec_buffer_w .
+    The first spec_buffer_pad of it is a copy of the last spec_buffer_pad of it.
+    """
     with sd.InputStream(device=args.device, channels=1, callback=update_spectrogram,
                         blocksize=samples_buffer_block_size,
                         samplerate=samplerate):
@@ -195,9 +199,8 @@ def stream_inference_of_microphone_audio(args):
             tf.saved_model.loader.load(sess, [tf.saved_model.tag_constants.SERVING], args.model_dir)
             predictor = tf.contrib.predictor.from_saved_model(args.model_dir)
 
-            network_example_length = 19840
-            network_spec_w = 124
-            spectrogram_predictions = np.zeros((spec_buffer_w + spec_buffer_pad))
+            network_spec_w = args.model_input_width
+            spectrogram_predictions = np.zeros((spec_buffer_w + spec_buffer_pad, 3))
             
             display_predictions = np.stack([np.arange(spec_buffer_w), np.zeros(spec_buffer_w)]).astype(int).T
             frame = np.zeros((spec_buffer_h, spec_buffer_w, 3), dtype=np.uint8)
@@ -206,6 +209,8 @@ def stream_inference_of_microphone_audio(args):
             N = 90
             myfilt = alpha*((1-alpha)**np.arange(0,N))
             myfilt /= myfilt[:60].sum()
+
+            last_pred_write = 0
 
             perf = MovingWindowPerf()
             while True:
@@ -222,37 +227,45 @@ def stream_inference_of_microphone_audio(args):
                 # we look into the past
                 se = idx_now + spec_buffer_pad
                 ss = se - network_spec_w
-                # assert se-ss==network_spec_w
-                # assert se < spec_buffer_pad + spec_buffer_w
 
                 next_input = np.expand_dims(spec_buffer[:, ss:se], 0)
 
-                mask = predictor({"spectrograms": next_input })['output'][0]
+                prediction = predictor({"spectrograms": next_input })['output']
                 perf.tick()
-                # mask = (spec_buffer_p % 100) / 100.0
+                prediction = prediction[0] # batch size of one
                 
-                # two writes because of the dilation
-                spectrogram_predictions[ss:se:2] = mask
-                spectrogram_predictions[ss+1:se:2] = mask
+                spectrogram_predictions[last_pred_write:se,:] = prediction[-1,:] # write latest prediction
+                last_pred_write = se
+                pred_class = np.argmax(prediction[-1,:])
+                
                 # secondary buffer write because of the padding
-                if ss < spec_buffer_pad:
-                    spectrogram_predictions[ss+spec_buffer_w:spec_buffer_pad+spec_buffer_w] = spectrogram_predictions[ss:spec_buffer_pad]
+                # if ss < spec_buffer_pad:
+                #     spectrogram_predictions[ss+spec_buffer_w:spec_buffer_pad+spec_buffer_w] = spectrogram_predictions[ss:spec_buffer_pad]
+                
                 # erase the future
-                spectrogram_predictions[se:] = 0
+                spectrogram_predictions[se+1:] = 0
 
-                smoothed_mask = np.correlate(spectrogram_predictions, myfilt, 'same')
+                # smoothed_mask = np.correlate(spectrogram_predictions, myfilt, 'same')
 
-                # display code
-                display_predictions[:,1] = (spec_buffer_h - (smoothed_mask[spec_buffer_pad:] * spec_buffer_h)).astype(int)
-                cv2.polylines(frame, [display_predictions], isClosed=False, color=(0,0,255))
+                ### display code
+                # display_predictions[:,1] = (spec_buffer_h - (smoothed_mask[spec_buffer_pad:] * spec_buffer_h)).astype(int)
+                # cv2.polylines(frame, [display_predictions], isClosed=False, color=(0,0,255))
 
-                display_predictions[:,1] = (spec_buffer_h - (spectrogram_predictions[spec_buffer_pad:] * spec_buffer_h)).astype(int)
-                cv2.polylines(frame, [display_predictions], isClosed=False, color=(255,0,0))
+                blue = (255,0,0)
+                red = (0,0,255)
+                green = (0,255,0)
+                colors = [green, blue, red]
+                activities = ['voice', 'silence', 'alexa']
 
-                cv2.line(frame, (idx_now, 0), (idx_now, spec_buffer_h), (0,255,0), 2)
-                cv2.line(frame, (0, spec_buffer_h//2), (spec_buffer_w, spec_buffer_h//2), (0,0,255), 2)
+                for i, color in enumerate(colors):
+                    display_predictions[:,1] = (spec_buffer_h - (spectrogram_predictions[spec_buffer_pad:, i] * spec_buffer_h)).astype(int)
+                    cv2.polylines(frame, [display_predictions], isClosed=False, color=color) 
 
-                __draw_label(frame, perf.fps_str('inferences/sec'), (0,255,0))
+                cv2.line(frame, (idx_now, 0), (idx_now, spec_buffer_h), green, 2) # moving vertical line
+                cv2.line(frame, (0, spec_buffer_h//2), (spec_buffer_w, spec_buffer_h//2), red, 2) # horizontal line
+
+                __draw_label(frame, activities[pred_class], colors[pred_class], (spec_buffer_w//2, 0))
+                __draw_label(frame, perf.fps_str('inferences/sec'), green)
 
                 cv2.imshow("Press 'q' to quit", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -278,6 +291,9 @@ def main():
     parser.add_argument(
         '-m', '--model_dir', type=str, default='/Users/ilyak/Downloads/spectrogram03.20.20/1584800014',
         help='...')
+    parser.add_argument(
+        '-w', '--model_input_width', type=int, default=31,
+        help='This is the width of the spectrogram input the model expects. Used to be 124.')
 
     args = parser.parse_args(remaining)
 
