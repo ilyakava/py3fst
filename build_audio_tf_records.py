@@ -69,6 +69,8 @@ parser.add_argument("--train_path", help="...", default=None)
 parser.add_argument("--val_path", help="...", default=None)
 parser.add_argument('--percentage_train', default=0.8, type=float,
                     help='...')
+parser.add_argument('--negative_version_percentage', default=0.0, type=float,
+                    help='...')
 parser.add_argument('--win_length', default=sr//40, type=int,
                     help='...')
 parser.add_argument('--hop_length', default=sr//100, type=int,
@@ -162,9 +164,9 @@ def _update_record_writer(record_writer, next_record, num_examples,
 def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
-def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir, output_negative_version, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir, negative_version_percentage, max_per_record, text, idx_offset, win_length, hop_length, example_length):
     """
-    output_negative_version: if True then output an audio file without any wakeword also
+    negative_version_percentage: if True then output an audio file without any wakeword also
     """
     global counter
     num_examples = 0
@@ -184,7 +186,11 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
             rand_pitch_shift = random.choice(pitch_shift_opts)
             
             try:
-                output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, rand_pitch_shift, example_length)
+                # negative version
+                if random.random() < negative_version_percentage:
+                    output, labs = augment_audio_with_words(None, None, n_file, rand_p_duration, rand_pitch_shift, example_length)
+                else:
+                    output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, rand_pitch_shift, example_length)
                 
                 source1 = output.mean(axis=1)
                 keyword = labs[:,1]
@@ -302,7 +308,7 @@ def _init_pool(l, c):
     
 _idx_offset = 0
 
-def build_dataset_randomized(args, p_files, n_files, path, output_negative_version=False):
+def build_dataset_randomized(args, p_files, n_files, path, negative_version_percentage=0.0):
     """Chunking stage.
     
     Chunked by number threads.
@@ -330,7 +336,7 @@ def build_dataset_randomized(args, p_files, n_files, path, output_negative_versi
                           'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
                           'positive_multiplier': args.positive_multiplier,
                           'output_dir': path,
-                          'output_negative_version': output_negative_version,
+                          'negative_version_percentage': negative_version_percentage,
                           'max_per_record': args.max_per_record,
                           'text': '_clean_speech_%.2d' % i,
                           'idx_offset': _idx_offset,
@@ -477,7 +483,7 @@ def create_wakeword_dataset(args):
                                 p_files=p_val_files,
                                 n_files=n_val_files,
                                 path=args.val_path,
-                                output_negative_version=True)
+                                negative_version_percentage=args.negative_version_percentage)
 
 def create_phoneme_dataset(args):
     # speaker separation for phonemes

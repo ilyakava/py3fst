@@ -298,15 +298,19 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shif
       
       pitch_shift: octaves to shift, can be float, -3..+3 is a reasonable range
     """
-    wakeword_samples, _ = sf.read(p_file)
-    wakeword = Clip(wakeword_samples, *p_start_end)
-    wakeword = time_stretch_to_target(wakeword, target_len=p_duration, sr=sr, tolerance=0.05)
-    wakeword = Clip(pyrb.pitch_shift(wakeword.samples, sr=sr, n_steps=pitch_shift), wakeword.start, wakeword.end)
-    
-    # to really match the volume neded to scale within the duration of the word
-    cur_dBFS = peak_windowed_dBFS(wakeword.samples[wakeword.start:wakeword.end])
-    a = scaling_for_dBFS_change(cur_dBFS, target_dBFS)
-    wakeword = Clip(a*wakeword.samples, wakeword.start, wakeword.end)
+    if p_file is not None:
+        wakeword_samples, _ = sf.read(p_file)
+        wakeword = Clip(wakeword_samples, *p_start_end)
+        wakeword = time_stretch_to_target(wakeword, target_len=p_duration, sr=sr, tolerance=0.05)
+        wakeword = Clip(pyrb.pitch_shift(wakeword.samples, sr=sr, n_steps=pitch_shift), wakeword.start, wakeword.end)
+        
+        # to really match the volume neded to scale within the duration of the word
+        cur_dBFS = peak_windowed_dBFS(wakeword.samples[wakeword.start:wakeword.end])
+        a = scaling_for_dBFS_change(cur_dBFS, target_dBFS)
+        wakeword = Clip(a*wakeword.samples, wakeword.start, wakeword.end)
+    else:
+        wakeword = None
+        
     
     samples_other_speech, _ = sf.read(n_file)
     
@@ -314,6 +318,9 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shif
     filtered_oth = filter_for_speech(samples_other_speech)
     normed_oth = scale_to_peak_windowed_dBFS(filtered_oth, target_dBFS=DEFAULT_DB)
     intervals = wordlike_split(normed_oth)
+    if len(intervals) < 1:
+        raise ValueError("Was unable to find at least 1 word in %s." % n_file)
+    # TODO: use audio left out by intervals to extract segments
     
     output = np.zeros((example_length,3))
     labs = np.zeros((example_length,3))
@@ -331,7 +338,7 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shif
         # flip a coin to see if wakeword should be inserted
         # the probability should be 1 by the last second
         insert_wakeword = random.random() < (t/max(1, example_length - sr))
-        if not inserted_wakeword and insert_wakeword:
+        if wakeword and not inserted_wakeword and insert_wakeword:
             # wakeword has padding
             ds = max(0,t - wakeword.start)
             ss = max(0,ds + wakeword.start - t)
@@ -440,21 +447,16 @@ def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_re
     mono_room = scale_to_peak_windowed_dBFS(mono_room, target_dBFS)
     return mono_room
 
-def dBFS(signal):
-    """
-    signal is between -1,1
-    """
-    return 20*np.log10(np.sqrt((signal ** 2).mean()))
-    
 def todB(y):
     # 20*np.log10(np.sqrt(( y )))
+    # safer with potential zeros to use librosa 
     return librosa.core.power_to_db(y)
     
 def peak_windowed_dBFS(signal, rms_window=5):
     win = librosa.filters.get_window('hann', rms_window, fftbins=False)
     win = win / win.sum()
     y = np.convolve(signal, win, 'same')
-    return dBFS(y.max())
+    return todB( y.max()**2 )
 
 def scaling_for_dBFS_change(cur_dBFS, target_dBFS=DEFAULT_DB):
     """
