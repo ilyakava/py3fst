@@ -33,6 +33,12 @@ def prenet(out, hidden_units, is_training, dropout):
     out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
     prenet_out = tf.layers.dropout(out, rate=dropout, training=is_training)
     return prenet_out
+    
+def simple_prenet(out, hidden_units, is_training, dropout):
+    # to go from nfft -> hidden units
+    out = tf.layers.dense(out, units=hidden_units*2, activation=tf.nn.relu)
+    out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
+    return out
 
 def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, args):
     spec_h = args.feature_height # ~freq
@@ -196,13 +202,15 @@ def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
             out = tf.squeeze(out, axis=2) # [-1, t//2]
     return out
     
-def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, args):
+def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
     """
     1-D convolution bank + highway network, bottleneck, highway network
-    """
-    spec_h = args.feature_height # ~freq
-    spec_w = args.network_feature_width # time
     
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+        
     num_banks = 8 # 16 in tacotron
     hidden_units = 64 # 128 in tacotron
     norm_type = 'ins'
@@ -217,9 +225,7 @@ def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, args):
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
         with tf.variable_scope('prenet', reuse=reuse):
-            out = prenet(out, hidden_units, is_training, dropout)
-        with tf.variable_scope('conv_bank_1d', reuse=reuse):
-            out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
+            out = simple_prenet(out, hidden_units, is_training, dropout)
         
         # highway
         for i in range(4):

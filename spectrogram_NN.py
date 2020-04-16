@@ -34,15 +34,13 @@ def train(args):
     bs = args.batch_size
     n_classes = 3
     spec_h = args.feature_height
-    spec_w = args.tfrecord_feature_width
-    spec_cut_w = args.network_feature_width
     
     n_left = 20
     n_right = 10
-        
-    # train_parser = partial(time_cut_centered_wakeword_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)
-    train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
-    eval_parser = partial(parser, h=spec_h, w=spec_cut_w)    
+    smallest_spec_width = n_left+n_right+1
+
+    train_parser = partial(parser, h=spec_h, w=args.tfrecord_train_feature_width)    
+    eval_parser = partial(parser, h=spec_h, w=args.tfrecord_eval_feature_width)    
     
     ############### END OF SETUP
     
@@ -57,16 +55,25 @@ def train(args):
             
             # this is what happens in the network
             labels = labels + 1
-            
-            
+        
+        if mode == tf.estimator.ModeKeys.TRAIN:    
+            network_spec_w = args.tfrecord_train_feature_width
+        elif mode == tf.estimator.ModeKeys.EVAL:
+            network_spec_w = args.tfrecord_eval_feature_width
+        elif mode == tf.estimator.ModeKeys.PREDICT:
+            network_spec_w = smallest_spec_width
+        else:
+            network_spec_w = None
     
         # Build the neural network
         # Because Dropout have different behavior at training and prediction time, we
         # need to create 2 distinct computation graphs that still share the same weights.
         logits_train = network(features, args.dropout, reuse=False,
-                                is_training=True, n_classes=n_classes, args=args)
+                                is_training=True, n_classes=n_classes,
+                                spec_h=spec_h, spec_w=network_spec_w)
         logits_val = network(features, args.dropout, reuse=True,
-                                is_training=False, n_classes=n_classes, args=args)
+                                is_training=False, n_classes=n_classes,
+                                spec_h=spec_h, spec_w=network_spec_w)
     
         if args.pretrain_checkpoint is not None:
             tf.train.init_from_checkpoint(args.pretrain_checkpoint, pretrain_assignment_map)
@@ -94,16 +101,16 @@ def train(args):
         eval_hooks = []
         
         # show masks that are being made
-        def get_image_summary(ts_lab):
-            img_h = 5
-            img_w = spec_cut_w
-            # repeat twice
-            ts_lab_rep2 = tf.tile(tf.expand_dims(ts_lab, -1),(1,1,2))
-            ts_lab_rep2 = tf.reshape(ts_lab_rep2, [-1, img_w])
-            imgs = tf.tile(tf.expand_dims(ts_lab_rep2,-1), (1,1,img_h))
-            imgs = tf.transpose(imgs, [0,2,1])
-            imgs = tf.expand_dims(imgs, -1)
-            return imgs
+        # def get_image_summary(ts_lab):
+        #     img_h = 5
+        #     img_w = spec_cut_w
+        #     # repeat twice
+        #     ts_lab_rep2 = tf.tile(tf.expand_dims(ts_lab, -1),(1,1,2))
+        #     ts_lab_rep2 = tf.reshape(ts_lab_rep2, [-1, img_w])
+        #     imgs = tf.tile(tf.expand_dims(ts_lab_rep2,-1), (1,1,img_h))
+        #     imgs = tf.transpose(imgs, [0,2,1])
+        #     imgs = tf.expand_dims(imgs, -1)
+        #     return imgs
         
         # image-ify the features
         # img_hat = get_image_summary(prob_wake)
@@ -150,12 +157,13 @@ def train(args):
     
     ###############################
     
-    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, spec_cut_w)
+    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, smallest_spec_width)
 
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
-    # Eval Spec, save automatically
+    
+    # Export *pb automatically after eval
     def _key_better(best_eval_result, current_eval_result, key, higher_is_better):
         if higher_is_better:
             return best_eval_result[key] < current_eval_result[key]
@@ -166,8 +174,8 @@ def train(args):
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1,
         compare_fn=partial(_key_better, key='mask_accuracy', higher_is_better=True))
-    MRFA_exporter = tf.estimator.BestExporter(
-        name="MRFA_exporter",
+    MRFAR_exporter = tf.estimator.BestExporter(
+        name="MRFAR_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1,
         compare_fn=partial(_key_better, key='whole_clip/specificity_at_sensitivity_0.9700', higher_is_better=True))
@@ -179,15 +187,15 @@ def train(args):
         name="latest_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1)
-    exporters = [MRFA_exporter, acc_exporter, loss_exporter, latest_exporter]
-    # 45 steps at example_length=19840 is 1 hour
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45, exporters=exporters)
+    exporters = [MRFAR_exporter, acc_exporter, loss_exporter, latest_exporter]
+    
+    # 90 steps * 32 bs at example_length=19840 is 1 hour
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=90, exporters=exporters)
     
     if args.eval_only:
         model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
     else:
         tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
-    
     
     
     # model.export_savedmodel(args.model_root, saved_model_serving_input_receiver_fn)
@@ -203,10 +211,10 @@ def main():
                     help='...')
     parser.add_argument('--hop_length', default=sr//100, type=int,
                         help='... Becomes the frame size (One frame per this many audio samples).')
-    parser.add_argument('--tfrecord_feature_width', default=80000//160, type=int,
+    parser.add_argument('--tfrecord_train_feature_width', default=80000//160, type=int,
                         help='This is the width of the 2D features in the train tf.record.')
-    parser.add_argument('--network_feature_width', default=19840//160, type=int,
-        help='This is the width of the 2D features that should be fed to the network.')
+    parser.add_argument('--tfrecord_eval_feature_width', default=19840//160, type=int,
+                        help='This is the width of the 2D features in the eval tf.record.')
     parser.add_argument('--feature_height', default=80, type=int,
                     help='...')
     parser.add_argument('--pretrain_checkpoint', default=None, type=str,
