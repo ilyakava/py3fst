@@ -2,9 +2,8 @@
 
 python build_audio_tf_records.py \
 --positive_data_dir '/scratch0/ilya/locDoc/data/alexa/v1/alexa' \
---wakeword_metafile '/cfarhomes/ilyak/ilyakavalerov@gmail.com/ramawks69/pyfst/data/alexa.annotated.json' \
 --negative_data_dir '/scratch1/ilya/locDoc/data/LibriSpeech/train-clean-360' \
---train_path '/scratch1/ilya/locDoc/data/alexa/v6b/train_80000' \
+--train_path '/scratch1/ilya/locDoc/data/alexa/v6c/train_80000' \
 --example_length 80000 \
 --positive_multiplier 60 \
 --threads 8 \

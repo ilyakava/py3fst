@@ -35,11 +35,6 @@ counter = None
 random.seed(2020)
 
 sr = 16000
-pitch_shift_opts = np.arange(-3,3.5,0.5).tolist()
-silence_1_opts = np.arange(-0.1, 0.35, 0.05).tolist()
-silence_2_opts = np.arange(-0.1, 0.35, 0.05).tolist()
-loudness_opts = [1.0]
-positive_augment_opts = list(product(*[pitch_shift_opts, silence_1_opts, silence_2_opts, loudness_opts]))
 
 lengths_ms = np.arange(0.4,0.9,0.05)
 lengths_probabilities = np.array([16, 31, 80, 73, 76, 46, 26, 12, 4])
@@ -59,7 +54,8 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--dataset_type", help="wakeword | TIMIT", default="wakeword")
 parser.add_argument("--positive_data_dir", help="...")
-parser.add_argument("--wakeword_metafile", help="...")
+parser.add_argument("--wakeword_metafile", default='data/alexa.annotated.start_ends.json', help="Contains starts and ends of wakewords")
+parser.add_argument("--wakeword_pitch_file", default='data/alexa.annotated.pitches.json', help="Contains estimated pitches of wakewords in Hz of fundamental frequency.")
 parser.add_argument("--negative_data_dir", help="...")
 parser.add_argument('--positive_multiplier', default=1, type=int,
                     help='...')
@@ -164,7 +160,7 @@ def _update_record_writer(record_writer, next_record, num_examples,
 def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
-def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_multiplier, output_dir, negative_version_percentage, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, positive_multiplier, output_dir, negative_version_percentage, max_per_record, text, idx_offset, win_length, hop_length, example_length):
     """
     negative_version_percentage: if True then output an audio file without any wakeword also
     """
@@ -177,20 +173,25 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, n_files, positive_mult
 
     for idx, p_file in enumerate(tqdm(p_files, desc='Positive Recordings Processed')):
         p_start_end = p_start_ends[idx]
+        p_pitch = float(p_pitches[idx])
+        # experimentally found that +/- 60 Hz was the limit for the rubberband
+        # library, this becomes the target pitch
+        rand_pitch_range = np.clip([p_pitch - 60, p_pitch + 60], 80, 350)
         for j in range(positive_multiplier):
             # sample_id = idx + idx_offset
             
             n_file = n_files[idx*positive_multiplier + j]
             
             rand_p_duration = lengths_ms[np.random.multinomial(1, lengths_probabilities).tolist().index(1)]
-            rand_pitch_shift = random.choice(pitch_shift_opts)
+            rand_pitch = np.random.uniform(rand_pitch_range[0],rand_pitch_range[1])
+            frequency_multiplier = rand_pitch/p_pitch
             
             try:
                 # negative version
                 if random.random() < negative_version_percentage:
-                    output, labs = augment_audio_with_words(None, None, n_file, rand_p_duration, rand_pitch_shift, example_length)
+                    output, labs = augment_audio_with_words(None, None, n_file, rand_p_duration, frequency_multiplier, example_length)
                 else:
-                    output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, rand_pitch_shift, example_length)
+                    output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, frequency_multiplier, example_length)
                 
                 source1 = output.mean(axis=1)
                 keyword = labs[:,1]
@@ -319,6 +320,8 @@ def build_dataset_randomized(args, p_files, n_files, path, negative_version_perc
     
     with open(args.wakeword_metafile) as json_file:
         metadata = json.load(json_file)
+    with open(args.wakeword_pitch_file) as json_file:
+        pitch_data = json.load(json_file)
 
     pool = Pool(initializer=_init_pool, initargs=(lock, counter),
                 processes=args.threads)
@@ -329,10 +332,12 @@ def build_dataset_randomized(args, p_files, n_files, path, negative_version_perc
         p_files_chunk = p_files[i*p_chunk_size:((i+1)*p_chunk_size)]
         p_files_chunk_ = [os.path.join(*fname.split('/')[-2:]) for fname in p_files_chunk]
         p_start_ends = [metadata[fname] for fname in p_files_chunk_]
+        p_pitches = [pitch_data[fname] for fname in p_files_chunk_]
         n_chunk_size = len(p_files_chunk)*args.positive_multiplier
         
         args_list.append({'p_files': p_files_chunk,
                           'p_start_ends': p_start_ends,
+                          'p_pitches': p_pitches,
                           'n_files': n_files[n_files_pointer:(n_files_pointer+n_chunk_size)],
                           'positive_multiplier': args.positive_multiplier,
                           'output_dir': path,

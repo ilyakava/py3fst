@@ -245,6 +245,25 @@ def time_stretch_to_target(clip, target_len=0.550, sr=sr, tolerance=0.05):
         new_end = int(clip.end / time_stretch)
         return Clip(new_samples, new_start, new_end)
 
+def time_and_frequency_stretch(clip, sr=sr, target_len=0.550, frequency_multiplier=1.0):
+    """
+    Args:
+      clip: of Clip type
+      target_len: length in miliseconds that clip content should be
+    """
+    cur_len = (clip.end - clip.start)/sr
+    time_stretch = cur_len / target_len
+    
+    rbargs = dict()
+    rbargs.setdefault('--frequency', frequency_multiplier)
+    rbargs.setdefault('--tempo', time_stretch)
+    rbargs.setdefault('-F', '--pitch-hq')
+    rbargs.setdefault('--no-lamination', '-q')
+    new_samples = pyrb.__rubberband(clip.samples, sr, **rbargs)
+    new_start = int(clip.start / time_stretch)
+    new_end = int(clip.end / time_stretch)
+    return Clip(new_samples, new_start, new_end)
+
 
 def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_1, silence_2, loudness):
     """
@@ -287,7 +306,7 @@ def augment_audio(p_file, p_start_end, n_file, p_duration, pitch_shift, silence_
     output[:,1] *= k*loudness
     return output, labs
     
-def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shift, example_length, silence_max=0.6, silence_min=0.1, target_dBFS=DEFAULT_DB):
+def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, frequency_multiplier, example_length, silence_max=0.6, silence_min=0.1, target_dBFS=DEFAULT_DB):
     """
     Modifies the wakeword, surrounds it with n_file audio words. Outputs multiple channels.
     Does not extract.
@@ -301,8 +320,7 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, pitch_shif
     if p_file is not None:
         wakeword_samples, _ = sf.read(p_file)
         wakeword = Clip(wakeword_samples, *p_start_end)
-        wakeword = time_stretch_to_target(wakeword, target_len=p_duration, sr=sr, tolerance=0.05)
-        wakeword = Clip(pyrb.pitch_shift(wakeword.samples, sr=sr, n_steps=pitch_shift), wakeword.start, wakeword.end)
+        wakeword = time_and_frequency_stretch(wakeword, sr=sr, target_len=p_duration, frequency_multiplier=frequency_multiplier)
         
         # to really match the volume neded to scale within the duration of the word
         cur_dBFS = peak_windowed_dBFS(wakeword.samples[wakeword.start:wakeword.end])
