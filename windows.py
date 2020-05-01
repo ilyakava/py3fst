@@ -299,6 +299,60 @@ def fst2d_phi_factory(kernel_size):
         np.linalg.norm(kernel_size + [1]) / np.linalg.norm(kernel_size))
 
     return winO(1, kernel, [[0,0]], kernel_size)
+    
+def gen_cort(freq, l=32, sr=1000//8):
+    # nsltools function, cortical filter in temporal dimension
+    t = np.arange(l, dtype=float) / sr * freq
+    h = np.sin(2*np.pi*t) * t**2 * np.exp(-3.5*t) * freq;
+    h -= h.mean()
+    H0 = np.fft.fft(h, 2*l)
+    A = np.angle(H0[:l]);
+    H = np.abs(H0[:l])
+    H /= H.max()
+    return H * np.exp(1j*A)
+    
+def gen_corf(freq, l=32, sr=24):
+    # nsltools function, cortical filter in freq dimension
+    r1 = np.arange(l, dtype=float) / l * sr / 2 / freq
+    r1 = r1**2
+    H = r1 * np.exp(1-r1)
+    return H
+    
+def cortical_window(rate, scale, sign=1, l=32):
+    """
+    rate = t_freq
+    scale = f_freq
+    """
+    R1 = gen_cort(rate, l);
+    r1 = np.fft.ifft(R1, l*2);
+    r1 = r1[:l];
+
+    # % scale response
+    R2 = gen_corf(scale, l/2);
+    r2 = np.fft.ifft(R2, l);
+    r2 = np.roll(r2, l//2)
+
+    r1 = np.expand_dims(r1,0)
+    r2 = np.expand_dims(r2,-1)
+
+    if sign == -1:
+        r1 = r1.conj()
+
+    r = np.dot(r2, r1);
+    return r
+    
+def cortical_psi_factory(rv, sv, l):
+    """
+    in schematc nsltools uses params:
+    [4, 8, 16, 32], [.25, .5, 1, 2, 4, 8], 64
+    """
+    params = np.array(list(itertools.product(rv, sv, [1,-1])))
+    nfilt = len(params)
+    filters = np.zeros((l,l,nfilt), dtype=np.complex64)
+    for i, param in enumerate(params):
+        rate, scale, sign = param
+        filters[:,:,i] = cortical_window(rate, scale, sign, l)
+    return winO(nfilt, filters, params, np.array([l,l]))
 
 import matplotlib.pyplot as plt
 

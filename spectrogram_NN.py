@@ -12,7 +12,7 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import CBHBH_net, amazon_net, Guo_Li_net
+from networks.spectrogram_networks import Guo_Li_net, cortical_net_v0
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn, time_cut_centered_wakeword_parser
 
 import pdb
@@ -30,7 +30,8 @@ pretrain_assignment_map = {
 sr = 16000
 
 def train(args):
-    network = Guo_Li_net
+    # network = Guo_Li_net
+    network = cortical_net_v0
     bs = args.batch_size
     n_classes = 3
     spec_h = args.feature_height
@@ -80,7 +81,8 @@ def train(args):
     
         # Predictions
         pred_probas = tf.nn.softmax(logits_val)
-        pred_classes = tf.argmax(logits_val, axis=2)
+        pred_classes = tf.argmax(logits_val, axis=2, output_type=tf.int32)
+        pred_wake = tf.maximum(0, pred_classes-1)
         prob_wake = pred_probas[:,:,2]
     
         # If prediction mode, early return
@@ -96,7 +98,7 @@ def train(args):
     
         # Evaluate the accuracy of the masks
         acc_op = tf.metrics.accuracy(labels=labels, predictions=pred_classes)
-        acc2_op = tf.metrics.accuracy(labels=detection_labels, predictions=pred_classes)
+        acc2_op = tf.metrics.accuracy(labels=detection_labels, predictions=pred_wake)
         myevalops = {'mask_accuracy': acc_op, 'detection_accuracy': acc2_op}
         eval_hooks = []
         
@@ -134,6 +136,12 @@ def train(args):
         threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
         for sensitivity in threshes:
             myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
+        
+        n_eval_examples_per_hour = 3600 / (args.tfrecord_eval_feature_width*args.hop_length / float(sr))
+        specificity = (n_eval_examples_per_hour-1) / n_eval_examples_per_hour
+        myevalops['whole_clip/sensitivity_at_1_FA_per_hour'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
+        specificity = ((n_eval_examples_per_hour*10) - 1) / (n_eval_examples_per_hour*10)
+        myevalops['whole_clip/sensitivity_at_1_FA_per_10_hours'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
         
         # Create a SummarySaverHook
         # eval_summary_hook = tf.estimator.SummarySaverHook(
