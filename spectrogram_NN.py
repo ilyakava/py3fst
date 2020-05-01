@@ -30,8 +30,8 @@ pretrain_assignment_map = {
 sr = 16000
 
 def train(args):
-    # network = Guo_Li_net
-    network = cortical_net_v0
+    network = Guo_Li_net
+    # network = cortical_net_v0
     bs = args.batch_size
     n_classes = 3
     spec_h = args.feature_height
@@ -39,6 +39,9 @@ def train(args):
     n_left = 20
     n_right = 10
     smallest_spec_width = n_left+n_right+1
+    inference_width = args.export_feature_width
+    if inference_width is None:
+        inference_width = smallest_spec_width
 
     train_parser = partial(parser, h=spec_h, w=args.tfrecord_train_feature_width)    
     eval_parser = partial(parser, h=spec_h, w=args.tfrecord_eval_feature_width)    
@@ -62,7 +65,7 @@ def train(args):
         elif mode == tf.estimator.ModeKeys.EVAL:
             network_spec_w = args.tfrecord_eval_feature_width
         elif mode == tf.estimator.ModeKeys.PREDICT:
-            network_spec_w = smallest_spec_width
+            network_spec_w = inference_width
         else:
             network_spec_w = None
     
@@ -165,9 +168,13 @@ def train(args):
     
     ###############################
     
-    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, smallest_spec_width)
+    saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, inference_width)
 
-    model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
+    if args.export_only_dir:
+        model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=args.warm_start_from)
+    else:
+        # you do not need the checkpoint directory if you have the saved model.
+        model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=args.warm_start_from)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
     
@@ -182,11 +189,16 @@ def train(args):
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1,
         compare_fn=partial(_key_better, key='mask_accuracy', higher_is_better=True))
-    MRFAR_exporter = tf.estimator.BestExporter(
-        name="MRFAR_exporter",
+    MR_exporter = tf.estimator.BestExporter(
+        name="MR_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1,
-        compare_fn=partial(_key_better, key='whole_clip/specificity_at_sensitivity_0.9700', higher_is_better=True))
+        compare_fn=partial(_key_better, key='whole_clip/sensitivity_at_1_FA_per_hour', higher_is_better=True))
+    FAR_exporter = tf.estimator.BestExporter(
+        name="FAR_exporter",
+        serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
+        exports_to_keep=1,
+        compare_fn=partial(_key_better, key='whole_clip/specificity_at_sensitivity_0.9900', higher_is_better=True))
     loss_exporter = tf.estimator.BestExporter(
         name="best_loss_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
@@ -195,18 +207,20 @@ def train(args):
         name="latest_exporter",
         serving_input_receiver_fn=saved_model_serving_input_receiver_fn,
         exports_to_keep=1)
-    exporters = [MRFAR_exporter, acc_exporter, loss_exporter, latest_exporter]
+    exporters = [MR_exporter, FAR_exporter, acc_exporter, loss_exporter, latest_exporter]
     
     # 90 steps * 32 bs at example_length=19840 is 1 hour
     eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=90, exporters=exporters)
     
     if args.eval_only:
         model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
+    elif args.export_only_dir:
+        model.export_savedmodel(args.export_only_dir, saved_model_serving_input_receiver_fn)
     else:
         tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
     
-    # model.export_savedmodel(args.model_root, saved_model_serving_input_receiver_fn)
+    
 
 
 def main():
@@ -226,7 +240,18 @@ def main():
     parser.add_argument('--feature_height', default=80, type=int,
                     help='...')
     parser.add_argument('--pretrain_checkpoint', default=None, type=str,
-                    help='Looks like: model_root/model.ckpt-0 or model_root/export/best_acc_exporter/1585776862/variables/variables')
+                    help='Looks like: model_root/model.ckpt-0 or \
+    model_root/export/best_acc_exporter/1585776862/variables/variables. \
+    This is a trained model from which to initialize a subset of weights from \
+    accoring to pretrain_assignment_map.')
+    parser.add_argument('--export_only_dir', default=None, type=str,
+                    help='If this argument is provided the model is only exported. The export is made from the model in model_root')
+    parser.add_argument('--export_feature_width', default=None, type=int,
+                    help='This is the width of the 2D features to be fed at inference time.')
+    parser.add_argument('--warm_start_from', default=None, type=str,
+                    help='This is passed into the Estimator initiation. It can \
+    be a full trained model from which to initialize all weights from. Looks \
+    like model_dir/export/MRFAR_exporter/1587168950')
 
     args = parser.parse_args()
     
