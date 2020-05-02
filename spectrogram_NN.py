@@ -170,11 +170,11 @@ def train(args):
     
     saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, inference_width)
 
-    if args.export_only_dir:
-        model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=args.warm_start_from)
-    else:
+    if args.export_only_dir is not None:
         # you do not need the checkpoint directory if you have the saved model.
         model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=args.warm_start_from)
+    else: # train/eval
+        model = tf.estimator.Estimator(model_fn, model_dir=args.model_dir, warm_start_from=args.warm_start_from)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
     
