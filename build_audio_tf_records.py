@@ -209,8 +209,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, po
                 
                 example = serialize_example(mix, samples_labs, win_length, hop_length, example_length)
             except Exception as e:
-                print("Error augmenting inputs %s, %s:" % (p_file, n_file))
-                print(e)
+                print("Error augmenting inputs {}, {}\n{}".format(p_file, n_file, e))
                 continue
             
             record_writer, next_record, num_examples = _update_record_writer(

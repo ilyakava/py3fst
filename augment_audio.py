@@ -43,6 +43,9 @@ class Clip(object):
     
     def __len__(self):
         return len(self.samples)
+    
+    def content(self):
+        return self.samples[self.start:self.end]
 
 def filter_for_speech(samples, sr=sr):
     """Filters np.array of samples with speech bandpass filter.
@@ -369,13 +372,16 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, frequency_
             inserted_wakeword = True
             t += wakeword.end - wakeword.start
         elif t + intv_len < example_length:
-            word_to_insert = samples_other_speech[intvs:intve]
             # time stretch up to room available, and freq warp
+            # pad a little for rubberband
+            rb_padded_s = max(0, intvs - int(0.15 * sr))
+            rb_padded_e = min(len(samples_other_speech), intve + int(0.15 * sr))
+            
             new_intv_len_sec = np.random.uniform(0.8*intv_len, min(example_length - t - 1, 1.2*intv_len)) / sr
             frequency_multiplier = np.random.uniform(0.8, 1.4)
-            word_to_insert_ = Clip(word_to_insert, 0, len(word_to_insert))
+            word_to_insert_ = Clip(samples_other_speech[rb_padded_s:rb_padded_e], intvs - rb_padded_s, intvs - rb_padded_s + intv_len)
             word_to_insert_ = time_and_frequency_stretch(word_to_insert_, sr=sr, target_len=new_intv_len_sec, frequency_multiplier=frequency_multiplier)
-            word_to_insert = word_to_insert_.samples
+            word_to_insert = word_to_insert_.content()
             new_intv_len = len(word_to_insert)
             
             insert = scale_to_peak_windowed_dBFS(word_to_insert, target_dBFS=target_dBFS)
