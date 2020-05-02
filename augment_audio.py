@@ -232,7 +232,7 @@ def time_stretch_to_target(clip, target_len=0.550, sr=sr, tolerance=0.05):
     Don't alter if current length is within tolerance.
     Args:
       clip: of Clip type
-      target_len: length in miliseconds that clip content should be
+      target_len: length in seconds that clip content should be
       tolerance: in ms
     """
     cur_len = (clip.end - clip.start)/sr
@@ -249,7 +249,7 @@ def time_and_frequency_stretch(clip, sr=sr, target_len=0.550, frequency_multipli
     """
     Args:
       clip: of Clip type
-      target_len: length in miliseconds that clip content should be
+      target_len: length in seconds that clip content should be
     """
     cur_len = (clip.end - clip.start)/sr
     time_stretch = cur_len / target_len
@@ -369,13 +369,22 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, frequency_
             inserted_wakeword = True
             t += wakeword.end - wakeword.start
         elif t + intv_len < example_length:
-            insert = scale_to_peak_windowed_dBFS(samples_other_speech[intvs:intve], target_dBFS=target_dBFS)
+            word_to_insert = samples_other_speech[intvs:intve]
+            # time stretch up to room available, and freq warp
+            new_intv_len_sec = np.random.uniform(0.8*intv_len, min(example_length - t - 1, 1.2*intv_len)) / sr
+            frequency_multiplier = np.random.uniform(0.8, 1.4)
+            word_to_insert_ = Clip(word_to_insert, 0, len(word_to_insert))
+            word_to_insert_ = time_and_frequency_stretch(word_to_insert_, sr=sr, target_len=new_intv_len_sec, frequency_multiplier=frequency_multiplier)
+            word_to_insert = word_to_insert_.samples
+            new_intv_len = len(word_to_insert)
+            
+            insert = scale_to_peak_windowed_dBFS(word_to_insert, target_dBFS=target_dBFS)
             track_idx = int(inserted_wakeword)*2
-            output[t:(t+intv_len),track_idx] = (insert - insert.mean())
-            labs[t:(t+intv_len),track_idx] = 1
+            output[t:(t+new_intv_len),track_idx] = (insert - insert.mean())
+            labs[t:(t+new_intv_len),track_idx] = 1
             interval_p += 1
             silence_last = False
-            t += intv_len
+            t += new_intv_len
         else:
             interval_p += 1
             
