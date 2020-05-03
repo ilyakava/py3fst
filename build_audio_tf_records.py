@@ -73,7 +73,8 @@ parser.add_argument('--hop_length', default=sr//100, type=int,
                     help='... Becomes the frame size (One frame per this many audio samples).')
 parser.add_argument('--example_length', default=80000, type=int,
                     help='The length in samples of examples to output. It should be a multiple of hop_length.')
-parser.add_argument("--noise_type", help="clean | gwn", default="clean")
+parser.add_argument("--noise_type", help="clean | gwn. Used for phoneme dataset", default="clean")
+parser.add_argument("--demand_data_dir", help="Noise audio samples.", default=None)
 
 parser.add_argument('--threads', default=8, type=int,
                     help='Number of threads to use')
@@ -160,7 +161,10 @@ def _update_record_writer(record_writer, next_record, num_examples,
 def _build_tf_records_from_dataset_wrapper(kwargs):
     return _build_tf_records_from_dataset(**kwargs)
 
-def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, positive_multiplier, output_dir, negative_version_percentage, max_per_record, text, idx_offset, win_length, hop_length, example_length):
+def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
+    positive_multiplier, output_dir, negative_version_percentage, \
+    max_per_record, text, idx_offset, win_length, hop_length, \
+    example_length, noise_files):
     """
     negative_version_percentage: if True then output an audio file without any wakeword also
     """
@@ -189,7 +193,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, po
             try:
                 # negative version
                 if random.random() < negative_version_percentage:
-                    output, labs = augment_audio_with_words(None, None, n_file, rand_p_duration, frequency_multiplier, example_length)
+                    output, labs = augment_audio_with_words(None, None, n_file, rand_p_duration, frequency_multiplier, example_length, target_dBFS=-15.0)
                 else:
                     output, labs = augment_audio_with_words(p_file, p_start_end, n_file, rand_p_duration, frequency_multiplier, example_length)
                 
@@ -198,8 +202,14 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, po
                 voice = np.clip(labs[:,0] + labs[:,2], 0, 1)
                 samples_labs = (keyword - voice).astype(int)
                 
-                snr = np.clip(np.random.normal(20,5), 10, 100)
-                source2 = gwn_for_audio(source1, snr=snr)
+                if noise_files is None:
+                    snr = np.clip(np.random.normal(20,5), 10, 100)
+                    source2 = gwn_for_audio(source1, snr=snr)
+                else:
+                    noise_file = noise_files[idx*positive_multiplier + j]
+                    source2, _ = sf.read(noise_file)
+                    source2 = scale_to_peak_windowed_dBFS(source2, target_dBFS=-25.0)
+                    
                 room_dim, room_absorption = random.sample(room_sim_opts, 1)[0]
                 source2_distance = 1.0
                 source1_distance = np.clip(np.random.normal(0.5, 0.1), 0.1, 1.0)
@@ -308,7 +318,7 @@ def _init_pool(l, c):
     
 _idx_offset = 0
 
-def build_dataset_randomized(args, p_files, n_files, path, negative_version_percentage=0.0):
+def build_dataset_randomized(args, p_files, n_files, path, negative_version_percentage=0.0, noise_files=None):
     """Chunking stage.
     
     Chunked by number threads.
@@ -334,6 +344,11 @@ def build_dataset_randomized(args, p_files, n_files, path, negative_version_perc
         p_pitches = [pitch_data[fname] for fname in p_files_chunk_]
         n_chunk_size = len(p_files_chunk)*args.positive_multiplier
         
+        chunk_noise_files = None
+        if noise_files:
+            chunk_noise_files = noise_files[:n_chunk_size]
+            chunk_noise_files = np.roll(noise_files, -n_chunk_size)
+        
         args_list.append({'p_files': p_files_chunk,
                           'p_start_ends': p_start_ends,
                           'p_pitches': p_pitches,
@@ -346,7 +361,8 @@ def build_dataset_randomized(args, p_files, n_files, path, negative_version_perc
                           'idx_offset': _idx_offset,
                           'win_length': args.win_length,
                           'hop_length': args.hop_length,
-                          'example_length': args.example_length
+                          'example_length': args.example_length,
+                          'noise_files': chunk_noise_files
         })
         n_files_pointer += n_chunk_size
     
@@ -466,6 +482,18 @@ def train_val_speaker_separation_wakeword_metafile(args, percentage_train=0.8):
             raise ValueError("%s is neither in train nor val set" % path)
 
     return train_files, val_files
+    
+def load_demand_precut(noise_data_dir):
+    categories = ['DKITCHEN', 'DLIVING', 'DWASHING', 'OHALLWAY', 'OOFFICE', 'PCAFETER', 'SCAFE']
+    category_importance = [1, 1, 0.2, 0.8, 0.8, 0.4, 0.2]
+    
+    all_files = []
+    for i, category in enumerate(categories):
+        files = glob.glob(os.path.join(noise_data_dir, category, '*.wav'))
+        random.shuffle(files)
+        all_files += files[:int(category_importance[i] * len(files))]
+    return all_files
+        
 
 def create_wakeword_dataset(args):
     n_train_files, n_val_files = train_val_speaker_separation(args.negative_data_dir, fglob='*/*.flac', percentage_train=args.percentage_train)
@@ -477,17 +505,24 @@ def create_wakeword_dataset(args):
     random.shuffle(n_train_files)
     random.shuffle(n_val_files)
     
+    noise_files = None
+    if args.demand_data_dir is not None:
+        noise_files = load_demand_precut(args.demand_data_dir)
+        random.shuffle(noise_files)
+    
     if args.train_path is not None:
         build_dataset_randomized(args,
                                 p_files=p_train_files,
                                 n_files=n_train_files,
-                                path=args.train_path)
+                                path=args.train_path,
+                                noise_files=noise_files)
     if args.val_path is not None:
         build_dataset_randomized(args,
                                 p_files=p_val_files,
                                 n_files=n_val_files,
                                 path=args.val_path,
-                                negative_version_percentage=args.negative_version_percentage)
+                                negative_version_percentage=args.negative_version_percentage,
+                                noise_files=noise_files)
 
 def create_phoneme_dataset(args):
     # speaker separation for phonemes
