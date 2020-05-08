@@ -174,7 +174,7 @@ def train(args):
         # you do not need the checkpoint directory if you have the saved model.
         model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=args.warm_start_from)
     else: # train/eval
-        model = tf.estimator.Estimator(model_fn, model_dir=args.model_dir, warm_start_from=args.warm_start_from)
+        model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=args.warm_start_from)
     
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
     
