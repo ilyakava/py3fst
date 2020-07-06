@@ -30,8 +30,8 @@ pretrain_assignment_map = {
 sr = 16000
 
 def train(args):
-    network = Guo_Li_net
-    # network = cortical_net_v0
+    # network = Guo_Li_net
+    network = cortical_net_v0
     bs = args.batch_size
     n_classes = 3
     spec_h = args.feature_height

@@ -40,7 +40,7 @@ def simple_prenet(out, hidden_units, is_training, dropout):
     out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
     return out
 
-def concat_rategram_scalegram(stft_mag, rv, sv, l=32):
+def concat_rategram_scalegram(stft_mag, rv, sv, l, is_training, dropout):
     psi = win.cortical_psi_factory(rv, sv, l)
     nrate = len(rv)
     nscale = 2*len(sv)
@@ -55,6 +55,8 @@ def concat_rategram_scalegram(stft_mag, rv, sv, l=32):
     U1 = tf.reshape(U1, [-1, h, w, nrate, nscale])
     ### bs, time varying, frequency varying, h, w
     U1 = tf.transpose(U1, [0,3,4,1,2])
+    
+    U1 = tf.layers.dropout(U1, rate=dropout, training=is_training)
     
     # rategram is max over scale varying
     rategram = tf.layers.max_pooling3d(U1, (1,nscale,1), (1,nscale,1), padding='same')
@@ -331,6 +333,7 @@ def cortical_net_v0(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec
     rv = [4, 8, 16, 32]
     sv = [.25, .5, 1, 2, 4, 8]
     ncort = len(rv) + 2*len(sv)
+    filter_size = 32
 
     num_banks = 8 # 16 in tacotron
     hidden_units = 64 # 128 in tacotron
@@ -344,7 +347,7 @@ def cortical_net_v0(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec
         x = x_dict['spectrograms']
         x = tf.reshape(x, (-1,spec_h,spec_w))
         
-        cortical = concat_rategram_scalegram(x, rv, sv) # batch, freq, time, chan
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
         
         out = tf.transpose(cortical, [0,2,1,3])
         out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
