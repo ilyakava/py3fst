@@ -16,7 +16,7 @@ lib/libsvm/svm-train
 lib/libsvm/svm.o
 lib/libsvm/tools/*
 
-.ipynb_checkpoints/*
+.ipynb_checkpoints
 
 # explicitly add scripts
 scripts/*.sh
