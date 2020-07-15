@@ -13,22 +13,20 @@ from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import CBHG_net, CBHBG_net, CBHBH_net
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn
 
 import pdb
 
 sr = 16000
 
-network_dict = {
-    'CBHG': CBHG_net,
-    'CBHBG': CBHBG_net,
-    'CBHBH': CBHBH_net
-}
-HAS_BOTTLENECK = ('CBHBG', 'CBHBH')
-
 def train(args):
-    network = network_dict[args.network_type]
+    # dynamically select which model.
+    network = getattr(__import__('networks.spectrogram_networks', fromlist=[args.network_name]), args.network_name)
+    
+    n_left = 20
+    n_right = 10
+    smallest_spec_width = n_left+n_right+1
+    
     bs = args.batch_size
     phn2idx, idx2phn, phns = load_vocab()
     n_classes = len(phns)
@@ -36,24 +34,25 @@ def train(args):
     spec_w = args.tfrecord_feature_width
     spec_cut_w = args.network_feature_width
         
-    train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)    
+    train_parser = partial(time_cut_parser, h=spec_h, in_w=spec_w, out_w=spec_cut_w)  
     eval_parser = partial(parser, h=spec_h, w=spec_cut_w)    
     
     ############### END OF SETUP
     
     # Define the model function (following TF Estimator Template)
     def model_fn(features, labels, mode):
-        if args.network_type in HAS_BOTTLENECK:
-            if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
-                labels = labels[:,::2]
+        
+        if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
+            if args.network_name in ['Guo_Li_net']:
+                labels = labels[:,n_left:-n_right]
     
         # Build the neural network
         # Because Dropout have different behavior at training and prediction time, we
         # need to create 2 distinct computation graphs that still share the same weights.
         logits_train = network(features, args.dropout, reuse=False,
-                                is_training=True, n_classes=n_classes, args=args)
+                                is_training=True, n_classes=n_classes, spec_h=spec_h, spec_w=spec_cut_w)
         logits_val = network(features, args.dropout, reuse=True,
-                                is_training=False, n_classes=n_classes, args=args)
+                                is_training=False, n_classes=n_classes, spec_h=spec_h, spec_w=spec_cut_w)
     
         # Predictions
         pred_probas = tf.nn.softmax(logits_val)
@@ -82,8 +81,9 @@ def train(args):
             phones_sep = tf.split(as_str, num_or_size_splits=sz, axis=1)
             phones_cat = tf.strings.join(phones_sep, separator='-')
             return phones_cat
-        true_phones = phoneme_summary(labels, spec_cut_w//2)
-        pred_phones = phoneme_summary(pred_classes, spec_cut_w//2)
+        
+        true_phones = phoneme_summary(labels, labels.shape[1])
+        pred_phones = phoneme_summary(pred_classes, pred_classes.shape[1])
         phones_table = tf.concat([true_phones, pred_phones], axis=1)
         tf.summary.text('true_vs_pred_phones', phones_table)
         
@@ -123,7 +123,9 @@ def train(args):
 
     model = tf.estimator.Estimator(model_fn, model_dir=args.model_root)
     
-    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
+    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(
+        args.train_data_root, bs, train_parser,
+        shift=args.train_shift, center=args.train_center), max_steps=args.max_steps)
     
     # Eval Spec, save automatically
     def _acc_higher(best_eval_result, current_eval_result):
@@ -144,7 +146,9 @@ def train(args):
         exports_to_keep=1)
     exporters = [acc_exporter, loss_exporter, latest_exporter]
     # 45 steps at example_length=19840 is 1 hour
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser), steps=45, exporters=exporters)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(
+        args.val_data_root, bs, eval_parser,
+        shift=args.val_shift, center=args.val_center), steps=45, exporters=exporters)
     
     tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
@@ -171,7 +175,7 @@ def main():
         help='This is the width of the 2D features that should be fed to the network.')
     parser.add_argument('--feature_height', default=40, type=int,
                     help='...')
-    parser.add_argument('--network_type', default='CBHBH', help='...')
+    parser.add_argument('--network_name', default='Guo_Li_net', help='...')
 
     args = parser.parse_args()
 

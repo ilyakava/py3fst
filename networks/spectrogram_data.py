@@ -85,7 +85,7 @@ def time_cut_centered_wakeword_parser(serialized_example, h, in_w, out_w):
     
     return spec[:,si:ei], label[si:ei]
     
-def input_fn(tfrecord_dir, bs=32, parser=parser, infinite=True):
+def input_fn(tfrecord_dir, bs=32, parser=parser, infinite=True, shift=None, center=None):
     """
     This function is called once for every example for every epoch, so
     data augmentation that happens randomly will be different every
@@ -109,6 +109,11 @@ def input_fn(tfrecord_dir, bs=32, parser=parser, infinite=True):
     iterator = dataset.make_one_shot_iterator()
     
     features, labels = iterator.get_next()
+    
+    if shift is not None:
+        features = tf.subtract(features, shift)
+    if center is not None:
+        features = tf.divide(features, center)
     
     return { 'spectrograms': features }, labels
     

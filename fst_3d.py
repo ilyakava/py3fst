@@ -500,7 +500,6 @@ def single_input_example():
     feed_dict = {x: subimg}
     myres = sess.run(feat, feed_dict)
     print myres.shape
-    pdb.set_trace()
 
 def run_all_accs():
     # mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Indian_pines_corrected.mat'))
@@ -576,7 +575,6 @@ def run_all_accs():
     # traintestfilenames = [ 'KSC_gt_traintest_1_6061b3.mat', 'KSC_gt_traintest_2_c4043d.mat', 'KSC_gt_traintest_3_db432b.mat', 'KSC_gt_traintest_4_95e0ef.mat', 'KSC_gt_traintest_5_3d7a8e.mat', 'KSC_gt_traintest_6_2a60db.mat', 'KSC_gt_traintest_7_ae63a4.mat', 'KSC_gt_traintest_8_b128c8.mat', 'KSC_gt_traintest_9_9ed856.mat', 'KSC_gt_traintest_10_548b31.mat' ];
     # hyper_run_acc(data, labels, KSC_net(), traintestfilenames[:1])
 
-    pdb.set_trace()
     mat_contents = sio.loadmat(os.path.join(DATASET_PATH, 'Botswana.mat'))
     data = mat_contents['Botswana'].astype(np.float32)
     data = pxnn.normalize_channels(data)

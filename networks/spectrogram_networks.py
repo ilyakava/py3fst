@@ -70,10 +70,7 @@ def concat_rategram_scalegram(stft_mag, rv, sv, l, is_training, dropout):
     # batch, freq, time, channels
     return cortical
 
-def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, args):
-    spec_h = args.feature_height # ~freq
-    spec_w = args.network_feature_width # time
-    
+def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
     num_banks = 8
     hidden_units = 64
     num_highway_blocks = 4
@@ -85,9 +82,10 @@ def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, args):
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
 
         with tf.variable_scope('prenet', reuse=reuse):
-            out = prenet(out, hidden_units, is_training, dropout)
-        with tf.variable_scope('conv_bank_1d', reuse=reuse):
-            out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
+            # out = prenet(out, hidden_units, is_training, dropout)
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        # with tf.variable_scope('conv_bank_1d', reuse=reuse):
+        #     out = conv_bank_1d(out, num_banks, hidden_units, norm_type, is_training)
         
         # highway
         for i in range(4):
@@ -101,7 +99,7 @@ def CBHG_net(x_dict, dropout, reuse, is_training, n_classes, args):
         with tf.variable_scope('classification', reuse=reuse):
             out = tf.layers.dense(out, n_classes)
             if n_classes == 1:
-                out = tf.squeeze(out, axis=2) # [-1, t//2]
+                out = tf.squeeze(out, axis=2)
 
     return out
     

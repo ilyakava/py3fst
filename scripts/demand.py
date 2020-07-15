@@ -59,8 +59,6 @@ def precut_demand_dataset(args):
                 start_sec = round(start_samples / sr, 3)
                 ffmpeg_cmds.append('ffmpeg -y -hide_banner -loglevel panic -ss {} -i {} -t {} -acodec copy {}'.format(start_sec, channel_full_path, eg_len_s, output_full_path))
     
-    # pdb.set_trace()
-
     pbar = tqdm(total=len(ffmpeg_cmds))
 
     with mp.Pool(processes = args.nthreads) as p:

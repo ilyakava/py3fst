@@ -165,7 +165,6 @@ def tang_save_features(data, labels, groundtruthfilename='100p'):
         feed_dict = {x: subimg}
         labelled_pix_feat[pixel_i,:] = sess.run(feat, feed_dict)
 
-    pdb.set_trace()
     flat_labels = labels.transpose().reshape(height*width)
     trainY = flat_labels[flat_labels!=0]
     
@@ -493,7 +492,6 @@ if __name__ == '__main__':
     tang_run_all_full_imgs()
     # now
 
-    # pdb.set_trace()
 
     # [class_accs, oa, aa, kappa] = experiment_acc(struct('path', '/scratch0/ilya/locDoc/data/hyperspec'), 'Smith_gt_traintest_p05_1_dd77f9.mat_WST3D_expt.mat')
 

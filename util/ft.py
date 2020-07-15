@@ -22,6 +22,11 @@ def normalize_0_1(values, m=None, M=None):
     normalized = np.clip((values - m) / (M - m), 0, 1)
     return normalized
     
+def unnormalize_0_1(normalized, m, M):
+    """deep-voice-conversion
+    """
+    return (np.clip(normalized, 0, 1) * (M - m)) + m
+    
 def dct_filters(n_filters, n_input):
     """https://librosa.github.io/librosa/0.6.3/_modules/librosa/filters.html#dct
     """

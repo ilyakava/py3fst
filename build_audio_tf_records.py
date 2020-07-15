@@ -53,20 +53,20 @@ room_sim_opts = list(product(*[room_dim_opts, room_absorption_opts]))
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--dataset_type", help="wakeword | TIMIT", default="wakeword")
-parser.add_argument("--positive_data_dir", help="...")
+parser.add_argument("--positive_data_dir", help="Directory of Kaggle Wakewords. Will be separated by speaker for train/val.")
 parser.add_argument("--wakeword_metafile", default='data/alexa.annotated.start_ends.json', help="Contains starts and ends of wakewords")
 parser.add_argument("--wakeword_pitch_file", default='data/alexa.annotated.pitches.json', help="Contains estimated pitches of wakewords in Hz of fundamental frequency.")
-parser.add_argument("--negative_data_dir", help="...")
+parser.add_argument("--negative_data_dir", help="Directory of Librispeech. Will be separated by speaker for train/val.")
 parser.add_argument('--positive_multiplier', default=1, type=int,
-                    help='...')
+                    help='Use each positive raw data example this many times. Each use will be modified by pitch, time, etc.')
 parser.add_argument('--max_per_record', default=200, type=int,
                     help='Should be set such that each tfrecord file is ~100MB.')
-parser.add_argument("--train_path", help="...", default=None)
-parser.add_argument("--val_path", help="...", default=None)
+parser.add_argument("--train_path", help="Path to output training tfrecords.", default=None)
+parser.add_argument("--val_path", help="Path to output validation tfrecords.", default=None)
 parser.add_argument('--percentage_train', default=0.8, type=float,
-                    help='...')
+                    help='Percentage of raw audio speakers that should be in train set.')
 parser.add_argument('--negative_version_percentage', default=0.0, type=float,
-                    help='...')
+                    help='Percentage of outputs to not include a positive data example. Should be non-zero when only 1 word fits in the desired example length.')
 parser.add_argument('--win_length', default=sr//40, type=int,
                     help='...')
 parser.add_argument('--hop_length', default=sr//100, type=int,
@@ -119,8 +119,9 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     # spec = samples2mfcc(samples, win_length, hop_length)
     
     feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
-    # the labels need to be adapted to the feature size
-    samp_max_pool = maximum_filter1d(samples_label, size=args.win_length, mode='constant', cval=0)[::args.hop_length]
+    # labels are adapted to the feature size just like the stft
+    samples_label_ = np.pad(samples_label, int(512 // 2), mode='constant', constant_values=0.0)
+    samp_max_pool = frame(samples_label_, frame_length=512, hop_length=hop_length).max(axis=0)
     feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
@@ -167,6 +168,8 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
     example_length, noise_files):
     """
     negative_version_percentage: if True then output an audio file without any wakeword also
+    
+    Creates 3 classes in the labels: -1 is other speech. +1 is Keyword. 0 is silence.
     """
     global counter
     num_examples = 0
@@ -200,6 +203,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
                 source1 = output.mean(axis=1)
                 keyword = labs[:,1]
                 voice = np.clip(labs[:,0] + labs[:,2], 0, 1)
+                # -1 is other speech. +1 is Keyword. 0 is silence.
                 samples_labs = (keyword - voice).astype(int)
                 
                 if noise_files is None:

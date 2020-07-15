@@ -2,6 +2,7 @@
 """
 
 from functools import partial
+import glob
 import logging
 import os
 
@@ -12,7 +13,6 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from networks.arguments import add_basic_NN_arguments
-from networks.spectrogram_networks import Guo_Li_net, cortical_net_v0
 from networks.spectrogram_data import parser, time_cut_parser, input_fn, identity_serving_input_receiver_fn, time_cut_centered_wakeword_parser
 
 import pdb
@@ -20,7 +20,6 @@ import pdb
 # from: to
 pretrain_assignment_map = {
     "CBHG/prenet/":"CBHBH/prenet/",
-    "CBHG/conv_bank_1d/":"CBHBH/conv_bank_1d/",
     "CBHG/highwaynet_featextractor_0/":"CBHBH/highwaynet_featextractor_0/",
     "CBHG/highwaynet_featextractor_1/":"CBHBH/highwaynet_featextractor_1/",
     "CBHG/highwaynet_featextractor_2/":"CBHBH/highwaynet_featextractor_2/",
@@ -30,11 +29,14 @@ pretrain_assignment_map = {
 sr = 16000
 
 def train(args):
-    # network = Guo_Li_net
-    network = cortical_net_v0
+    # dynamically select which model.
+    network = getattr(__import__('networks.spectrogram_networks', fromlist=[args.network_name]), args.network_name)
+    
     bs = args.batch_size
     n_classes = 3
     spec_h = args.feature_height
+    
+    warm_starts = sorted(glob.glob(args.warm_start_from)) if args.warm_start_from is not None else None
     
     n_left = 20
     n_right = 10
@@ -88,9 +90,9 @@ def train(args):
         pred_wake = tf.maximum(0, pred_classes-1)
         prob_wake = pred_probas[:,:,2]
     
-        # If prediction mode, early return
+        # If prediction mode, early return, with logits
         if mode == tf.estimator.ModeKeys.PREDICT:
-            return tf.estimator.EstimatorSpec(mode, predictions=pred_probas)
+            return tf.estimator.EstimatorSpec(mode, predictions={'softmax': pred_probas, 'logits': logits_val})
     
         # Define loss and optimizer
         loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -169,14 +171,20 @@ def train(args):
     ###############################
     
     saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, inference_width)
-
-    if args.export_only_dir is not None:
-        # you do not need the checkpoint directory if you have the saved model.
-        model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=args.warm_start_from)
-    else: # train/eval
-        model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=args.warm_start_from)
     
-    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(args.train_data_root, bs, train_parser), max_steps=args.max_steps)
+    if args.export_only_dir is not None:
+        # check that warm_start_from exists as a glob directory
+        assert warm_starts is not None, "Must provide warm start for exporting"
+        assert len(warm_starts), 'Did not find warm start directory: %s' % args.warm_start_from
+        # you do not need the checkpoint directory if you have the saved model.
+        model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=warm_starts[-1])
+    else: # train/eval
+        warm_start_from = warm_starts[-1] if (warm_starts is not None and len(warm_starts)) else None
+        model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=warm_start_from)
+    
+    train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(
+        args.train_data_root, bs, train_parser,
+        shift=args.train_shift, center=args.train_center), max_steps=args.max_steps)
     
     # Export *pb automatically after eval
     def _key_better(best_eval_result, current_eval_result, key, higher_is_better):
@@ -210,10 +218,14 @@ def train(args):
     exporters = [MR_exporter, FAR_exporter, acc_exporter, loss_exporter, latest_exporter]
     
     # 90 steps * 32 bs at example_length=19840 is 1 hour
-    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=90, exporters=exporters)
+    eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(
+        args.val_data_root, bs, eval_parser, infinite=False,
+        shift=args.val_shift, center=args.val_center), steps=90, exporters=exporters)
     
     if args.eval_only:
-        model.evaluate(input_fn = lambda: input_fn(args.val_data_root, bs, eval_parser, infinite=False), steps=None)
+        model.evaluate(input_fn = lambda: input_fn(
+            args.val_data_root, bs, eval_parser, infinite=False,
+            shift=args.val_shift, center=args.val_center), steps=None)
     elif args.export_only_dir:
         model.export_savedmodel(args.export_only_dir, saved_model_serving_input_receiver_fn)
     else:
@@ -251,7 +263,9 @@ def main():
     parser.add_argument('--warm_start_from', default=None, type=str,
                     help='This is passed into the Estimator initiation. It can \
     be a full trained model from which to initialize all weights from. Looks \
-    like model_dir/export/MRFAR_exporter/1587168950')
+    like model_dir/export/MRFAR_exporter/1587168950. Globing is supported.')
+    parser.add_argument('--network_name', default='cortical_net_v0', type=str,
+                    help='Name of network to import from networks.spectrogram_networks. e.g. Guo_Li_net')
 
     args = parser.parse_args()
     

@@ -357,8 +357,8 @@ def augment_audio_with_words(p_file, p_start_end, n_file, p_duration, frequency_
             t += int(np.random.uniform(silence_min, silence_max) * sr)
             silence_last = True
         # flip a coin to see if wakeword should be inserted
-        # the probability should be 1 by the last second
-        insert_wakeword = random.random() < (t/max(1, example_length - sr))
+        # the probability should be 1 by the last 1.25 seconds
+        insert_wakeword = random.random() < (t/max(1, example_length - (sr*1.25)))
         if wakeword and not inserted_wakeword and insert_wakeword:
             # wakeword has padding
             ds = max(0,t - wakeword.start)
@@ -602,19 +602,25 @@ def wordlike_split(samples, frame_length=1600, hop_length=400, min_length_s=0.35
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     """
     samples: 1-D array of values in range -1,1
+    
+    Returns a spectrogram that is n_fft // 2 + 1 high, and
+    len(samples) // hop_length + 1 wide
     """
     spec = np.abs(librosa.core.stft(samples,
         win_length=win_length,
         hop_length=hop_length,
         n_fft=n_fft))
-    height = n_fft // 2
-    width = len(samples) // hop_length
-    spec = spec[-height:,-width:]
     
     spec_db = librosa.amplitude_to_db(spec)
     spec_db = np.clip(spec_db, -55, 65)
     spec = librosa.db_to_amplitude(spec_db)
-    spec = normalize_0_1(spec)
+    # m, M = librosa.db_to_amplitude(np.array([-55.0, 65.0]))
+    # spec = normalize_0_1(spec, m, M)
+    
+    # Stevens's power law for loudness
+    spec = spec**0.3
+    
+    # spec = np.log(1+spec)
     
     return spec
 

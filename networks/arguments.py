@@ -23,6 +23,18 @@ def add_basic_NN_arguments(parser):
     parser.add_argument(
         '--dropout', type=float, default=0.2,
         help='Dropout rate.')
+    parser.add_argument(
+        '--train_shift', type=float, default=None,
+        help='...')
+    parser.add_argument(
+        '--val_shift', type=float, default=None,
+        help='...')
+    parser.add_argument(
+        '--train_center', type=float, default=None,
+        help='...')
+    parser.add_argument(
+        '--val_center', type=float, default=None,
+        help='...')
     # Other
     parser.add_argument(
         '--max_steps', type=int, default=10000000,
