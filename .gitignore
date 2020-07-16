@@ -20,3 +20,4 @@ lib/libsvm/tools/*
 
 # explicitly add scripts
 scripts/*.sh
+scripts/*/*.sh
