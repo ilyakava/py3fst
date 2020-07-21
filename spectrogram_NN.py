@@ -72,7 +72,7 @@ def train(args):
             network_spec_w = None
     
         # Build the neural network
-        # Because Dropout have different behavior at training and prediction time, we
+        # Because Dropout has different behavior at training and prediction time, we
         # need to create 2 distinct computation graphs that still share the same weights.
         logits_train = network(features, args.dropout, reuse=False,
                                 is_training=True, n_classes=n_classes,
@@ -107,34 +107,6 @@ def train(args):
         myevalops = {'mask_accuracy': acc_op, 'detection_accuracy': acc2_op}
         eval_hooks = []
         
-        # show masks that are being made
-        # def get_image_summary(ts_lab):
-        #     img_h = 5
-        #     img_w = spec_cut_w
-        #     # repeat twice
-        #     ts_lab_rep2 = tf.tile(tf.expand_dims(ts_lab, -1),(1,1,2))
-        #     ts_lab_rep2 = tf.reshape(ts_lab_rep2, [-1, img_w])
-        #     imgs = tf.tile(tf.expand_dims(ts_lab_rep2,-1), (1,1,img_h))
-        #     imgs = tf.transpose(imgs, [0,2,1])
-        #     imgs = tf.expand_dims(imgs, -1)
-        #     return imgs
-        
-        # image-ify the features
-        # img_hat = get_image_summary(prob_wake)
-        # spec_h = args.feature_height # could cut off higher half frequencies here
-        
-        # summary_specs = features['spectrograms']
-        # summary_specs = tf.log(1 + summary_specs)
-        # bm = tf.reduce_min(summary_specs, (1,2), keepdims=True)
-        # bM = tf.reduce_max(summary_specs, (1,2), keepdims=True)
-        # img_specs = (summary_specs - bm) / (bM - bm)
-        # img_specs = tf.expand_dims(img_specs[:,:spec_h,:],-1)
-        # img_gt = get_image_summary(tf.cast(labels, dtype=tf.float32) / 2.0)
-        # img_gt_clip = get_image_summary(tf.cast(detection_labels, dtype=tf.float32) / 3.0)
-        # img_compare = tf.concat([img_hat, img_gt, img_gt_clip, img_specs], axis=1)
-        # tf.summary.image('Wakeword_Mask_Predictions', img_compare, max_outputs=5)
-        
-        
         # reduce across time
         clip_probas = tf.reduce_mean(prob_wake, axis=1)
         clip_gt = tf.reduce_max(detection_labels, axis=1)
@@ -147,15 +119,7 @@ def train(args):
         myevalops['whole_clip/sensitivity_at_1_FA_per_hour'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
         specificity = ((n_eval_examples_per_hour*10) - 1) / (n_eval_examples_per_hour*10)
         myevalops['whole_clip/sensitivity_at_1_FA_per_10_hours'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
-        
-        # Create a SummarySaverHook
-        # eval_summary_hook = tf.estimator.SummarySaverHook(
-        #                                 save_steps=1,
-        #                                 output_dir= args.model_root + "/eval",
-        #                                 summary_op=tf.summary.merge_all())
-        # # Add it to the evaluation_hook list
-        # eval_hooks.append(eval_summary_hook)
-        
+
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
         estim_specs = tf.estimator.EstimatorSpec(
@@ -231,9 +195,6 @@ def train(args):
     else:
         tf.estimator.train_and_evaluate(model, train_spec_dnn, eval_spec_dnn)
     
-    
-    
-
 
 def main():
     parser = argparse.ArgumentParser(
