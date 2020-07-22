@@ -36,7 +36,7 @@ def train(args):
     n_classes = 3
     spec_h = args.feature_height
     
-    warm_starts = sorted(glob.glob(args.warm_start_from)) if args.warm_start_from is not None else None
+    
     
     n_left = 20
     n_right = 10
@@ -80,8 +80,9 @@ def train(args):
         logits_val = network(features, args.dropout, reuse=True,
                                 is_training=False, n_classes=n_classes,
                                 spec_h=spec_h, spec_w=network_spec_w)
-    
+        
         if args.pretrain_checkpoint is not None:
+            # TODO: make sure this is only running on init
             tf.train.init_from_checkpoint(args.pretrain_checkpoint, pretrain_assignment_map)
     
         # Predictions
@@ -110,15 +111,23 @@ def train(args):
         # reduce across time
         clip_probas = tf.reduce_mean(prob_wake, axis=1)
         clip_gt = tf.reduce_max(detection_labels, axis=1)
-        threshes = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
-        for sensitivity in threshes:
-            myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
-        
         n_eval_examples_per_hour = 3600 / (args.tfrecord_eval_feature_width*args.hop_length / float(sr))
-        specificity = (n_eval_examples_per_hour-1) / n_eval_examples_per_hour
-        myevalops['whole_clip/sensitivity_at_1_FA_per_hour'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
-        specificity = ((n_eval_examples_per_hour*10) - 1) / (n_eval_examples_per_hour*10)
-        myevalops['whole_clip/sensitivity_at_1_FA_per_10_hours'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
+        
+        if args.eval_only:
+            # point of eval only mode is to get the threshold to get a desired
+            # performance at.
+            thresholds = np.arange(0.0, 1.0, 1.0/200, dtype=np.float32)
+            myevalops['whole_clip/false_positives'] = tf.metrics.false_positives_at_thresholds( clip_gt, clip_probas, thresholds)
+            myevalops['whole_clip/false_negatives'] = tf.metrics.false_negatives_at_thresholds( clip_gt, clip_probas, thresholds)
+        else:
+            sensitivities = 1 - (np.arange(1.0,3.5,1.0) / 100.0) # sensitivity = 1 - miss_rate
+            for sensitivity in sensitivities:
+                myevalops['whole_clip/specificity_at_sensitivity_%.4f' % sensitivity] = tf.metrics.specificity_at_sensitivity(clip_gt, clip_probas, sensitivity)
+            
+            specificity = (n_eval_examples_per_hour-1) / n_eval_examples_per_hour
+            myevalops['whole_clip/sensitivity_at_1_FA_per_hour'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
+            specificity = ((n_eval_examples_per_hour*10) - 1) / (n_eval_examples_per_hour*10)
+            myevalops['whole_clip/sensitivity_at_1_FA_per_10_hours'] = tf.metrics.sensitivity_at_specificity(clip_gt, clip_probas, specificity)
 
         # TF Estimators requires to return a EstimatorSpec, that specify
         # the different ops for training, evaluating, ...
@@ -136,6 +145,7 @@ def train(args):
     
     saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, inference_width)
     
+    warm_starts = sorted(glob.glob(args.warm_start_from)) if args.warm_start_from is not None else None
     if args.export_only_dir is not None:
         # check that warm_start_from exists as a glob directory
         assert warm_starts is not None, "Must provide warm start for exporting"
@@ -143,9 +153,13 @@ def train(args):
         # you do not need the checkpoint directory if you have the saved model.
         model = tf.estimator.Estimator(model_fn, model_dir=None, warm_start_from=warm_starts[-1])
     else: # train/eval
+        # only works from a fresh start
         warm_start_from = warm_starts[-1] if (warm_starts is not None and len(warm_starts)) else None
+        if warm_start_from is not None:
+            warm_start_from = os.path.join(warm_start_from, 'variables/variables')
+            warm_start_from = tf.estimator.WarmStartSettings(ckpt_to_initialize_from=warm_start_from, vars_to_warm_start=".*")
         model = tf.estimator.Estimator(model_fn, model_dir=args.model_root, warm_start_from=warm_start_from)
-    
+
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(
         args.train_data_root, bs, train_parser,
         shift=args.train_shift, center=args.train_center), max_steps=args.max_steps)
@@ -187,9 +201,12 @@ def train(args):
         shift=args.val_shift, center=args.val_center), steps=90, exporters=exporters)
     
     if args.eval_only:
-        model.evaluate(input_fn = lambda: input_fn(
+        eval_op_results = model.evaluate(input_fn = lambda: input_fn(
             args.val_data_root, bs, eval_parser, infinite=False,
             shift=args.val_shift, center=args.val_center), steps=None)
+        fname = os.path.join(args.model_root, 'eval_results.npz')
+        np.savez(fname, **eval_op_results)
+        print('Saved eval results to: %s' % fname)
     elif args.export_only_dir:
         model.export_savedmodel(args.export_only_dir, saved_model_serving_input_receiver_fn)
     else:
@@ -224,7 +241,8 @@ def main():
     parser.add_argument('--warm_start_from', default=None, type=str,
                     help='This is passed into the Estimator initiation. It can \
     be a full trained model from which to initialize all weights from. Looks \
-    like model_dir/export/MRFAR_exporter/1587168950. Globing is supported.')
+    like model_dir/export/MRFAR_exporter/1587168950. Globing is supported. \
+    Only works if the model_root is brand new and has no checkpoints.')
     parser.add_argument('--network_name', default='cortical_net_v0', type=str,
                     help='Name of network to import from networks.spectrogram_networks. e.g. Guo_Li_net')
 
@@ -232,6 +250,10 @@ def main():
     
     # create model dir if needed
     mkdirp(args.model_root)
+    
+    # some argument validation
+    if args.warm_start_from is not None:
+        assert len(glob.glob(os.path.join(args.model_root, '*model.ckpt*'))) == 0, 'For warm start to work there needs to be no checkpoints in args.model_root'
     
     # save arguments ran with
     write_metadata(args.model_root, args)
