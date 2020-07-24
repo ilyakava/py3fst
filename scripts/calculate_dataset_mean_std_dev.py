@@ -1,6 +1,6 @@
 """
 Example Usage:
-python scripts/calculate_dataset_mean_std_dev.py --tfrecord_glob='/scratch1/ilya/locDoc/data/alexa/v7.3/train_79840/*tfrecord'
+python scripts/calculate_dataset_mean_std_dev.py --tfrecord_glob=/scratch1/ilya/locDoc/data/alexa/v7.4/val_19680/*tfrecord
 """
 import argparse
 import glob
@@ -11,22 +11,15 @@ import tensorflow as tf
 
 from tqdm import tqdm
 
-spec_h = 257 # expected
-
-positive_examples = []
-negative_examples = []
-n_to_read = 1000
-class LimitExceded(Exception): pass
-running_min = 1
-running_max = 0
-
 def mean_std_dev_tfrecords(tfrecord_files):
+    num_examples = 0
     n = 0
     S = 0.0
     m = 0.0
     
     for tfrecord_file in tqdm(tfrecord_files):
         for example in tf.python_io.tf_record_iterator(tfrecord_file):
+            num_examples += 1
             eg_np = tf.train.Example.FromString(example)
             x = eg_np.features.feature["spectrogram"].float_list.value
             for x_i in x:
@@ -34,6 +27,7 @@ def mean_std_dev_tfrecords(tfrecord_files):
                 m_prev = m
                 m = m + (x_i - m) / n
                 S = S + (x_i - m) * (x_i - m_prev)
+    print('Finished processing %i examples' % num_examples)
     return {'mean': m, 'std': np.sqrt(S/n)}
     
 def main():

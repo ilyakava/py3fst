@@ -24,7 +24,7 @@ See `scripts` directory.
 Running on: Python 3.6.9, tensorflow 1.15, cuda/10.0.130, cudnn/v7.6.5.
 
 For creating datasets, works with: ffmpeg/4.2.1, rubberband 1.8.2.
-Also using vamp-plugin-sdk 2.9 2019-11-13, libsndfile Version 1.0.28, Version 0.1.9 Version 0.1.9.
+Also using vamp-plugin-sdk 2.9 2019-11-13, libsndfile Version 1.0.28, libsndfile Version 0.1.9.
 
 ## License
 
