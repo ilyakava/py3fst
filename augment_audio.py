@@ -10,6 +10,7 @@ from pyrubberband import pyrb
 import librosa.effects
 import librosa.core
 import librosa.filters
+from librosa.util import frame
 import numpy as np
 import pydub
 import pyroomacoustics as pra
@@ -596,8 +597,7 @@ def wordlike_split(samples, frame_length=1600, hop_length=400, min_length_s=0.35
     
     return intervals
 
-    
-
+### Ways to generate features/labels:
 
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     """
@@ -623,6 +623,15 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     # spec = np.log(1+spec)
     
     return spec
+    
+def sample_labels2spectrogam_labels(samples_label, win_length, hop_length, n_fft=512):
+    """Labels version of samples2spectrogam
+    """
+    # labels are adapted to the feature size just like the stft
+    samples_label_ = np.pad(samples_label, int(n_fft // 2), mode='constant', constant_values=0.0)
+    samp_max_pool = frame(samples_label_, frame_length=n_fft, hop_length=hop_length).max(axis=0)
+    return samp_max_pool
+
 
 def samples2mfcc(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):
     """Like in deep-voice-conversion

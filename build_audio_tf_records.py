@@ -27,7 +27,9 @@ import tensorflow as tf
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
-from augment_audio import augment_audio, extract_example, samples2mfcc, samples2spectrogam, augment_audio_two_negatives, mix_2_sources, gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words
+from augment_audio import augment_audio, extract_example, sample_labels2spectrogam_labels, \
+    samples2spectrogam, augment_audio_two_negatives, mix_2_sources, \
+    gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words
 
 import pdb
 
@@ -98,6 +100,23 @@ def _int64_feature(value):
     """Returns an int64_list from a bool / enum / int / uint."""
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
+def audio2feature(samples, feature_type, **kwargs):
+    """
+    Returns: flat float list
+    """
+    if feature_type == 'spectrogram':
+        feat = samples2spectrogam(samples, **kwargs)
+    return tf.train.FloatList(value=feat.reshape(-1))
+
+def audio_labels2feature_labels(samples_label, feature_type, **kwargs):
+    """
+    Returns: flat int64_list list
+    """
+    if feature_type == 'spectrogram':
+        labs = sample_labels2spectrogam_labels(samples_label, **kwargs)
+    return tf.train.Int64List(value=labs)
+
+
 def serialize_example(samples, samples_label, win_length, hop_length, example_length, sample_id=None):
     """
     Creates a tf.Example message ready to be written to a file.
@@ -115,14 +134,11 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     
     samples = scale_to_peak_windowed_dBFS(samples, target_dBFS=-15.0, rms_window=5)
     
-    spec = samples2spectrogam(samples, win_length, hop_length)
-    # spec = samples2mfcc(samples, win_length, hop_length)
+    example_features = audio2feature(samples, 'spectrogram', win_length=win_length, hop_length=hop_length)
+    feature['spectrogram'] = tf.train.Feature(float_list=example_features)
     
-    feature['spectrogram'] = tf.train.Feature(float_list=tf.train.FloatList(value=spec.reshape(-1)))
-    # labels are adapted to the feature size just like the stft
-    samples_label_ = np.pad(samples_label, int(512 // 2), mode='constant', constant_values=0.0)
-    samp_max_pool = frame(samples_label_, frame_length=512, hop_length=hop_length).max(axis=0)
-    feature['spectrogram_label'] = tf.train.Feature(int64_list=tf.train.Int64List(value=samp_max_pool))
+    example_feature_labels = audio_labels2feature_labels(samples_label, 'spectrogram', win_length=win_length, hop_length=hop_length)
+    feature['spectrogram_label'] = tf.train.Feature(int64_list=example_feature_labels)
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
     audio_segment = AudioSegment(
