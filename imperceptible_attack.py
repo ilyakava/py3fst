@@ -4,6 +4,7 @@ import glob
 from util.tool import *
 from networks.spectrogram_networks import Guo_Li_net
 import time
+import os
 
 audio_length = 19680
 initial_bound = 0.08 # initial l infinity norm for adversarial perturbation
@@ -11,9 +12,9 @@ h = 257  # shape of the spectrogram (batch_size, h, w)
 w = 31
 
 class Attack:
-    def __init__(self, sess, specs, labels, batch_size=1, lr_stage1=0.05, lr_stage2=0.05, num_iter_stage1 = 1000,
+    def __init__(self, sess, specs, labels, batch_size=1, lr_stage1=0.05, lr_stage2=0.5, num_iter_stage1 = 1000,
                 num_iter_stage2 = 5000):
-        self.specs = normalize(specs,tf=False)
+        self.specs = normalize(specs)
         self.labels = labels
         self.sess = sess 
         self.num_iter_stage1 = num_iter_stage1
@@ -32,7 +33,7 @@ class Attack:
         # variable
         self.delta = tf.Variable(np.zeros((batch_size, h, w), dtype=np.float32), name='delta')
         self.rescale = tf.Variable(np.ones((batch_size, 1, 1), dtype=np.float32), name='rescale')
-        self.alpha = tf.Variable(np.ones((batch_size), dtype=np.float32) * 0.05, name='alpha')
+        self.alpha = tf.Variable(np.ones((batch_size), dtype=np.float32) * 0.000001, name='alpha')
         
         # add perturbation
         self.apply_delta = tf.clip_by_value(self.delta, -initial_bound, initial_bound) * self.rescale   
@@ -79,7 +80,7 @@ class Attack:
         sess.run(tf.assign(self.delta, np.zeros((self.batch_size, h, w), dtype=np.float32)))
         
         feed_dict = {self.spec_input: self.specs, self.target_ph: target}
-     
+        
         # We'll make a bunch of iterations of gradient descent here
         now = time.time()
         MAX = self.num_iter_stage1
@@ -148,23 +149,29 @@ class Attack:
         sess.run(tf.initialize_all_variables())
         
         sess.run(tf.assign(self.rescale, np.ones((self.batch_size, 1, 1), dtype=np.float32)))
-        sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float32) * 0.05))
+        #sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float32) * 0.0))
+        sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float64) * 1e-10))
         
         # reassign the perturbation
         sess.run(tf.assign(self.delta, adv))        
         
         feed_dict = {self.spec_input: self.specs, self.target_ph: self.target, self.psd_max_ori: psd_max_batch, self.th: th_batch}
-                   
+        predictions, loss = sess.run((self.output_ph, tf.reduce_mean(self.loss_th)), feed_dict) 
+        print("Perturbation sucess rate:{}".format(accuracy(predictions, self. target)))
+        print("Original perceptual loss:{}".format(loss))
+        print("\n")
        
         # We'll make a bunch of iterations of gradient descent here
         now = time.time()
         MAX = self.num_iter_stage2
         loss_th = [np.inf] * self.batch_size
-        final_deltas = [None] * self.batch_size
+        final_deltas = list(adv)
+        mask = [None] * self.batch_size
         final_alpha = [None] * self.batch_size
         
         clock = 0
         min_th = 0.0005 
+        count = 0
         for i in range(MAX):           
             now = time.time()
             # Do the optimization                          
@@ -176,7 +183,8 @@ class Attack:
                 if verbose == 1:
                     print("Total adversarial loss at iteration {}:{}".format(i, np.mean(loss)))
                     print("Total perceptual loss at iteration {}:{}".format(i, np.mean(p_loss)))
-                    print("Perturbation sucess rate:{}".format(accuracy(predictions, self.target)))
+                    #print("Perturbation sucess rate:{}".format(accuracy(predictions, self.target)))
+                    print("Perturbation sucess rate:{}".format(count/self.batch_size))
                     print("\n")
                     # Sample five examples from the batch 
                     if (self.batch_size >=5):
@@ -197,17 +205,20 @@ class Attack:
                     # if the network makes the targeted prediction
                     if np.argmax(predictions[ii]) == np.argmax(self.target[ii]):
                         if p_loss[ii] < loss_th[ii]:
+                            if (mask[ii] is None):
+                                count+=1
+                                mask[ii] = 0
                             final_deltas[ii] = new_inputs[ii]
                             loss_th[ii] = p_loss[ii] 
                             final_alpha[ii] = alpha[ii]
                            
                         # increase the alpha each 20 iterations    
-                        if i % 20 == 0:                                
-                            alpha[ii] *= 1.2
+                        if i % 10 == 0:                                
+                            alpha[ii] *= 2.0
                             sess.run(tf.assign(self.alpha, alpha))
                                                 
                     # if the network fails to make the targeted prediction, reduce alpha each 50 iterations
-                    if i % 50 == 0 and np.argmax(predictions[ii]) != np.argmax(self.target[ii]):
+                    if i % 10 == 0 and np.argmax(predictions[ii]) != np.argmax(self.target[ii]):
                         alpha[ii] *= 0.8
                         alpha[ii] = max(alpha[ii], min_th)
                         sess.run(tf.assign(self.alpha, alpha))
@@ -215,18 +226,20 @@ class Attack:
                 # in case no final_delta return        
                 if (i == MAX-1 and final_deltas[ii] is None):
                     final_deltas[ii] = new_inputs[ii] 
-            if i % 500 == 0:
+            if i % 40 == 0:
                 print("alpha is {}, loss_th is {}".format(final_alpha, loss_th))
             if i % 10 == 0:
                 print("ten iterations take around {} ".format(clock))
                 clock = 0
+            if i % 100 == 0:
+                print("Finish {}%".format(i*100/self.num_iter_stage2))
              
             clock += time.time() - now
-            
+        final_deltas = np.array(final_deltas)
         return final_deltas, loss_th, final_alpha
     
 def main():
-    batched_input, labels, th_batch, psd_max_batch = load_data()
+    _, batched_input, labels, th_batch, psd_max_batch = load_data()
     # Set the attack target
     target = np.zeros((328,3))
     target[:,0] = np.ones(328)
@@ -234,13 +247,21 @@ def main():
     attack = Attack(tf.Session(), batched_input, labels, 
                     batch_size=batched_input.shape[0], 
                     lr_stage1=0.03, lr_stage2=0.05, 
-                    num_iter_stage1 = 500, num_iter_stage2=5000)
-    print("----------------Attack Stage 1----------------------")
-    adv_example = attack.attack_stage1(target, verbose=0)
+                    num_iter_stage1 = 500, num_iter_stage2=50)
+    adv = np.zeros(batched_input.shape)
+    if (not os.path.isfile('pgd adversarial examples.npy')):
+        print("----------------Attack Stage 1----------------------")
+        adv_example = attack.attack_stage1(target, verbose=1)
+        adv = adv_example - normalize(batched_input)
+        with open('pgd adversarial examples.npy', 'wb') as f:
+            np.save(f, unnormalize(adv_example))
+    else:
+        adv = normalize(np.load("pgd adversarial examples.npy")) - normalize(batched_input)
+        attack.target = target
     print("----------------Attack Stage 2----------------------")
-    adv_example, loss_th, final_alpha = attack.attack_stage2(adv_example, th_batch, psd_max_batch, verbose=1)
+    adv_example, loss_th, final_alpha = attack.attack_stage2(adv, th_batch, psd_max_batch, verbose=1)
     with open('perceptual adversarial examples.npy', 'wb') as f:
-        np.save(f, adv_example)
+        np.save(f, unnormalize(adv_example))
         
 if __name__ == '__main__':
     main()   
