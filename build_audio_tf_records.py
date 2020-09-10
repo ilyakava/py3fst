@@ -29,7 +29,8 @@ from util.misc import mkdirp
 from util.phones import load_vocab
 from augment_audio import augment_audio, extract_example, sample_labels2spectrogam_labels, \
     samples2spectrogam, augment_audio_two_negatives, mix_2_sources, \
-    gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words
+    gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words, \
+    samples2dft
 
 import pdb
 
@@ -77,6 +78,7 @@ parser.add_argument('--example_length', default=80000, type=int,
                     help='The length in samples of examples to output. It should be a multiple of hop_length.')
 parser.add_argument("--noise_type", help="clean | gwn. Used for phoneme dataset", default="clean")
 parser.add_argument("--demand_data_dir", help="Noise audio samples.", default=None)
+parser.add_argument("--feature_type", help="The type of feature to convert the audio into in the tfrecords. Can be one of: spectrogram", default="spectrogram")
 
 parser.add_argument('--threads', default=8, type=int,
                     help='Number of threads to use')
@@ -106,18 +108,24 @@ def audio2feature(samples, feature_type, **kwargs):
     """
     if feature_type == 'spectrogram':
         feat = samples2spectrogam(samples, **kwargs)
+    if feature_type == 'dft':
+        feat = samples2dft(samples, **kwargs)
+    else:
+        raise ValueError("Feature type %s is unsupported." % feature_type)
     return tf.train.FloatList(value=feat.reshape(-1))
 
 def audio_labels2feature_labels(samples_label, feature_type, **kwargs):
     """
     Returns: flat int64_list list
     """
-    if feature_type == 'spectrogram':
+    if feature_type in ['spectrogram', 'dft']:
         labs = sample_labels2spectrogam_labels(samples_label, **kwargs)
+    else:
+        raise ValueError("Feature type %s is unsupported." % feature_type)
     return tf.train.Int64List(value=labs)
 
 
-def serialize_example(samples, samples_label, win_length, hop_length, example_length, sample_id=None):
+def serialize_example(samples, samples_label, win_length, hop_length, example_length, feature_type, sample_id=None):
     """
     Creates a tf.Example message ready to be written to a file.
     """
@@ -134,10 +142,10 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     
     samples = scale_to_peak_windowed_dBFS(samples, target_dBFS=-15.0, rms_window=5)
     
-    example_features = audio2feature(samples, 'spectrogram', win_length=win_length, hop_length=hop_length)
+    example_features = audio2feature(samples, feature_type, win_length=win_length, hop_length=hop_length)
     feature['spectrogram'] = tf.train.Feature(float_list=example_features)
     
-    example_feature_labels = audio_labels2feature_labels(samples_label, 'spectrogram', win_length=win_length, hop_length=hop_length)
+    example_feature_labels = audio_labels2feature_labels(samples_label, feature_type, win_length=win_length, hop_length=hop_length)
     feature['spectrogram_label'] = tf.train.Feature(int64_list=example_feature_labels)
     
     samples_as_ints = (samples * 2**15).astype(np.int16)
@@ -181,7 +189,7 @@ def _build_tf_records_from_dataset_wrapper(kwargs):
 def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
     positive_multiplier, output_dir, negative_version_percentage, \
     max_per_record, text, idx_offset, win_length, hop_length, \
-    example_length, noise_files):
+    example_length, noise_files, feature_type):
     """
     negative_version_percentage: if True then output an audio file without any wakeword also
     
@@ -237,7 +245,7 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
                 mix = mix_2_sources(source1, source2, room_dim, room_absorption, source1_distance, source2_distance, target_dBFS=-15.0)
                 mix = mix[:example_length]
                 
-                example = serialize_example(mix, samples_labs, win_length, hop_length, example_length)
+                example = serialize_example(mix, samples_labs, win_length, hop_length, example_length, feature_type)
             except Exception as e:
                 print("Error augmenting inputs {}, {}\n{}".format(p_file, n_file, e))
                 continue
@@ -256,7 +264,9 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
 def _build_tf_records_from_phoneme_dataset_wrapper(kwargs):
     return _build_tf_records_from_phoneme_dataset(**kwargs)
 
-def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, text, idx_offset, win_length, hop_length, example_length, noise_type):
+def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, \
+    text, idx_offset, win_length, hop_length, example_length, noise_type, \
+    feature_type):
     """Builds tfrecords from TIMIT where whole source is used.
     Padded with zeros to be constant length. Segments are extracted
     with half second overlap.
@@ -317,7 +327,7 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, te
             else:
                 raise ValueError("Unsupported noise_type %s" % noise_type)
             
-            example = serialize_example(mix, phns[:,sub_clip_i], win_length, hop_length, example_length)
+            example = serialize_example(mix, phns[:,sub_clip_i], win_length, hop_length, example_length, feature_type)
         
             record_writer, next_record, num_examples = _update_record_writer(
                 record_writer=record_writer, next_record=next_record,
@@ -382,7 +392,8 @@ def build_dataset_randomized(args, p_files, n_files, path, negative_version_perc
                           'win_length': args.win_length,
                           'hop_length': args.hop_length,
                           'example_length': args.example_length,
-                          'noise_files': chunk_noise_files
+                          'noise_files': chunk_noise_files,
+                          'feature_type': args.feature_type
         })
         n_files_pointer += n_chunk_size
     
@@ -427,7 +438,8 @@ def build_phoneme_dataset_randomized(args, files, path):
                           'win_length': args.win_length,
                           'hop_length': args.hop_length,
                           'example_length': args.example_length,
-                          'noise_type': args.noise_type
+                          'noise_type': args.noise_type,
+                          'feature_type': args.feature_type
         })
     
     print('Work scheduled, starting now...')

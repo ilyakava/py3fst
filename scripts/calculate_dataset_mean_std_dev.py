@@ -30,6 +30,10 @@ def mean_std_dev_tfrecords(tfrecord_files):
     print('Finished processing %i examples' % num_examples)
     return {'mean': m, 'std': np.sqrt(S/n)}
     
+def pretty_print(stats):
+    for k, v in stats:
+        print(k + ': {}'.format(v, ' .8f'))
+    
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -44,7 +48,7 @@ def main():
     
     stats = mean_std_dev_tfrecords(files)
     
-    print(stats)
+    pretty_print(stats)
     
     tfrecord_dir = os.path.dirname(os.path.abspath(args.tfrecord_glob))
     savefile = os.path.join(tfrecord_dir, "stats.txt")

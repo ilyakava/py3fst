@@ -600,7 +600,9 @@ def wordlike_split(samples, frame_length=1600, hop_length=400, min_length_s=0.35
 ### Ways to generate features/labels:
 
 def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
-    """
+    """Magnitude of spectrogram.
+    For labels use: sample_labels2spectrogam_labels.
+    
     samples: 1-D array of values in range -1,1
     
     Returns a spectrogram that is n_fft // 2 + 1 high, and
@@ -614,13 +616,9 @@ def samples2spectrogam(samples, win_length, hop_length, n_fft=512):
     spec_db = librosa.amplitude_to_db(spec)
     spec_db = np.clip(spec_db, -55, 65)
     spec = librosa.db_to_amplitude(spec_db)
-    # m, M = librosa.db_to_amplitude(np.array([-55.0, 65.0]))
-    # spec = normalize_0_1(spec, m, M)
     
-    # Stevens's power law for loudness
+    # Stevens's power law for loudness, ok. it should be .33
     spec = spec**0.3
-    
-    # spec = np.log(1+spec)
     
     return spec
     
@@ -631,6 +629,30 @@ def sample_labels2spectrogam_labels(samples_label, win_length, hop_length, n_fft
     samples_label_ = np.pad(samples_label, int(n_fft // 2), mode='constant', constant_values=0.0)
     samp_max_pool = frame(samples_label_, frame_length=n_fft, hop_length=hop_length).max(axis=0)
     return samp_max_pool
+    
+def samples2dft(samples, win_length, hop_length, n_fft=512):
+    """Real and Imaginary part of spectrogram.
+    For labels use: sample_labels2spectrogam_labels.
+    
+    samples: 1-D array of values in range -1,1
+    
+    Returns a spectrogram that is 2 * (n_fft // 2 + 1) high, and
+    len(samples) // hop_length + 1 wide
+    """
+    z = librosa.core.stft(samples,
+        win_length=win_length,
+        hop_length=hop_length,
+        n_fft=n_fft)
+    
+    def power_law_compression(data, alpha=0.3):
+        sgn = np.sign(data)
+        # Stevens's power law
+        return sgn * np.abs(data)**alpha
+        
+    x = power_law_compression(np.real(z))
+    y = power_law_compression(np.imag(z))
+    
+    return np.concatenate([x, y], axis=-1)
 
 
 def samples2mfcc(samples, win_length, hop_length, n_fft=512, n_mels=80, n_mfcc=40):

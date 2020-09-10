@@ -22,3 +22,7 @@ lib/libsvm/tools/*
 scripts/*.sh
 scripts/*/*.sh
 data/*wav
+
+# temporary exploratory notebooks
+Plots.ipynb
+inspect_wakeword_dataset.ipynb

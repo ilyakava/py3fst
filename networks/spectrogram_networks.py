@@ -265,7 +265,7 @@ def amazon_net(x_dict, dropout, reuse, is_training, n_classes, args):
     
 def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
     """
-    1-D convolution bank + highway network, bottleneck, highway network
+    prenet + highway network, bottleneck, highway network
     
     Args:
         int spec_h: ~freq
@@ -284,6 +284,83 @@ def Guo_Li_net(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
         x = x_dict['spectrograms']
         x = tf.reshape(x, (-1,spec_h,spec_w))
         out = tf.transpose(x, [0,2,1]) # batch, time, depth
+
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def Guo_Li_complex_projection_net(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    Complex projection
+    prenet + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+        
+    c.f. Complex Linear Projection (CLP): A Discriminative Approach to Joint Feature Extraction and Acoustic Modeling
+        Ehsan Variani, Tara N. Sainath, Izhak Shafran, Michiel Bacchiani
+    """
+        
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        z = x_dict['spectrograms']
+        z = tf.reshape(z, (-1,spec_h,spec_w))
+        x_r = z[:,:(spec_h//2), :]
+        x_i = z[:, (spec_h//2):, :]
+        
+        x_r = tf.transpose(x_r, [0,2,1]) # batch, time, depth
+        x_i = tf.transpose(x_i, [0,2,1]) # batch, time, depth
+        
+        with tf.variable_scope('complex_projection', reuse=reuse):
+            wrxr = tf.layers.dense(x_r, units=128, activation=None, name='wr')
+            wixi = tf.layers.dense(x_i, units=128, activation=None, name='wi')
+            
+            wrxi = tf.layers.dense(x_i, units=128, activation=None, name='wr', reuse=True)
+            wixr = tf.layers.dense(x_r, units=128, activation=None, name='wi', reuse=True)
+            
+            ry = wrxr - wixi
+            iy = wrxi + wixr
+        
+            out = tf.pow(tf.pow(ry, 2) + tf.pow(iy, 2), 0.5)
 
         with tf.variable_scope('prenet', reuse=reuse):
             out = simple_prenet(out, hidden_units, is_training, dropout)
