@@ -39,3 +39,11 @@ def dct_filters(n_filters, n_input):
         basis[i, :] = np.cos(i*samples) * np.sqrt(2.0/n_input)
 
     return basis
+
+def power_law_compression(data, alpha=0.3):
+    """Stevens's power law
+    Done separately for positive/negative numbers
+    """
+    sgn = np.sign(data)
+    return sgn * np.abs(data)**alpha
+    

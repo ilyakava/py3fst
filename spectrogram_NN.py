@@ -36,8 +36,6 @@ def train(args):
     n_classes = 3
     spec_h = args.feature_height
     
-    
-    
     n_left = 20
     n_right = 10
     smallest_spec_width = n_left+n_right+1
@@ -46,7 +44,25 @@ def train(args):
         inference_width = smallest_spec_width
 
     train_parser = partial(parser, h=spec_h, w=args.tfrecord_train_feature_width)    
-    eval_parser = partial(parser, h=spec_h, w=args.tfrecord_eval_feature_width)    
+    eval_parser = partial(parser, h=spec_h, w=args.tfrecord_eval_feature_width)
+    
+    # setup shift and center for train and val
+    assert len(args.train_shift) == len(args.train_center) and \
+        len(args.train_center) == len(args.val_center) and \
+        len(args.val_center) == len(args.val_shift), "Train/Val Mean/Var normalization vectors must be the same length"
+    nc = len(args.train_shift)
+    assert spec_h % nc == 0, "Total number of features must be a multiple of number of channels"
+    feat_per_channel = spec_h // nc
+    if nc > 1:
+        train_mean = np.expand_dims(np.repeat(args.train_shift, (feat_per_channel,)),-1)
+        train_std = np.expand_dims(np.repeat(args.train_center, (feat_per_channel,)),-1)
+        val_mean = np.expand_dims(np.repeat(args.val_shift, (feat_per_channel,)),-1)
+        val_std = np.expand_dims(np.repeat(args.val_center, (feat_per_channel,)),-1)
+    else:
+        train_mean = args.train_shift[0]
+        train_std = args.train_center[0]
+        val_mean = args.val_shift[0]
+        val_std = args.val_center[0]
     
     ############### END OF SETUP
     
@@ -162,7 +178,7 @@ def train(args):
 
     train_spec_dnn = tf.estimator.TrainSpec(input_fn = lambda: input_fn(
         args.train_data_root, bs, train_parser,
-        shift=args.train_shift, center=args.train_center), max_steps=args.max_steps)
+        shift=train_mean, center=train_std), max_steps=args.max_steps)
     
     # Export *pb automatically after eval
     def _key_better(best_eval_result, current_eval_result, key, higher_is_better):
@@ -198,12 +214,12 @@ def train(args):
     # 90 steps * 32 bs at example_length=19840 is 1 hour
     eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(
         args.val_data_root, bs, eval_parser, infinite=False,
-        shift=args.val_shift, center=args.val_center), steps=90, exporters=exporters)
+        shift=val_mean, center=val_std), steps=90, exporters=exporters)
     
     if args.eval_only:
         eval_op_results = model.evaluate(input_fn = lambda: input_fn(
             args.val_data_root, bs, eval_parser, infinite=False,
-            shift=args.val_shift, center=args.val_center), steps=None)
+            shift=val_mean, center=val_std), steps=None)
         fname = os.path.join(args.model_root, 'eval_results.npz')
         np.savez(fname, **eval_op_results)
         print('Saved eval results to: %s' % fname)

@@ -1,4 +1,4 @@
-
+import json
 
 def add_basic_NN_arguments(parser):
     """
@@ -24,16 +24,16 @@ def add_basic_NN_arguments(parser):
         '--dropout', type=float, default=0.2,
         help='Dropout rate.')
     parser.add_argument(
-        '--train_shift', type=float, default=None,
+        '--train_shift', type=json.loads, default=None,
+        help='eg [1.5] or [1,2]')
+    parser.add_argument(
+        '--val_shift', type=json.loads, default=None,
         help='...')
     parser.add_argument(
-        '--val_shift', type=float, default=None,
+        '--train_center', type=json.loads, default=None,
         help='...')
     parser.add_argument(
-        '--train_center', type=float, default=None,
-        help='...')
-    parser.add_argument(
-        '--val_center', type=float, default=None,
+        '--val_center', type=json.loads, default=None,
         help='...')
     # Other
     parser.add_argument(
@@ -46,3 +46,4 @@ def add_basic_NN_arguments(parser):
         '--eval_only', action='store_true',
         help='Do not train only eval.')
     return parser
+    

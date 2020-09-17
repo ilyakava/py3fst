@@ -30,7 +30,7 @@ from util.phones import load_vocab
 from augment_audio import augment_audio, extract_example, sample_labels2spectrogam_labels, \
     samples2spectrogam, augment_audio_two_negatives, mix_2_sources, \
     gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words, \
-    samples2dft
+    samples2dft, samples2polar
 
 import pdb
 
@@ -108,20 +108,22 @@ def audio2feature(samples, feature_type, **kwargs):
     """
     if feature_type == 'spectrogram':
         feat = samples2spectrogam(samples, **kwargs)
-    if feature_type == 'dft':
+    elif feature_type == 'dft':
         feat = samples2dft(samples, **kwargs)
+    elif feature_type == 'polar':
+        feat = samples2polar(samples, **kwargs)
     else:
-        raise ValueError("Feature type %s is unsupported." % feature_type)
+        raise ValueError("audio2feature: Feature type %s is unsupported." % feature_type)
     return tf.train.FloatList(value=feat.reshape(-1))
 
 def audio_labels2feature_labels(samples_label, feature_type, **kwargs):
     """
     Returns: flat int64_list list
     """
-    if feature_type in ['spectrogram', 'dft']:
+    if feature_type in ['spectrogram', 'dft', 'polar']:
         labs = sample_labels2spectrogam_labels(samples_label, **kwargs)
     else:
-        raise ValueError("Feature type %s is unsupported." % feature_type)
+        raise ValueError("audio_labels2feature_labels: Feature type %s is unsupported." % feature_type)
     return tf.train.Int64List(value=labs)
 
 
