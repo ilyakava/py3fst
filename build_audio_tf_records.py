@@ -23,7 +23,12 @@ import soundfile as sf
 from tqdm import tqdm
 
 import tensorflow as tf
+if not tf.executing_eagerly():
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    tf.enable_eager_execution(config=config)
 
+from util.librosa import librosa_window_fn
 from util.log import write_metadata
 from util.misc import mkdirp
 from util.phones import load_vocab
@@ -108,6 +113,8 @@ def audio2feature(samples, feature_type, **kwargs):
     """
     if feature_type == 'spectrogram':
         feat = samples2spectrogam(samples, **kwargs)
+    elif feature_type == 'spectrogram_tf':
+        feat = samples2spectrogam_tf(samples, **kwargs)
     elif feature_type == 'dft':
         feat = samples2dft(samples, **kwargs)
     elif feature_type == 'polar':
@@ -116,11 +123,49 @@ def audio2feature(samples, feature_type, **kwargs):
         raise ValueError("audio2feature: Feature type %s is unsupported." % feature_type)
     return tf.train.FloatList(value=feat.reshape(-1))
 
+def samples2spectrogam_tf(samples, win_length, hop_length, n_fft=512):
+    """Magnitude of spectrogram.
+    For labels use: sample_labels2spectrogam_labels.
+    
+    Interchangeable with samples2spectrogam.
+    
+    samples: 1-D array of values in range -1,1
+    
+    Returns a spectrogram that is n_fft // 2 + 1 high, and
+    len(samples) // hop_length + 1 wide
+    """
+    x = tf.expand_dims(tf.cast(samples, tf.float32), 0) # batch, time
+    x = tf.pad(x, ((0, 0),(n_fft//2, n_fft//2)), "REFLECT")
+    
+    def mywindow_fn(argi, dtype):
+        """
+        argi is the length of the window that is returned. In this case it is
+        n_fft. The window returned will be a win_length window zero padded to
+        be n_fft long.
+        """
+        del argi
+        return tf.convert_to_tensor(librosa_window_fn(win_length, n_fft), dtype=dtype)
+    
+    spec = tf.signal.stft(
+        x,
+        frame_length=n_fft,
+        frame_step=hop_length,
+        fft_length=n_fft,
+        window_fn=mywindow_fn,
+        pad_end=False,
+        name='STFT'
+    )
+    spec = tf.abs(spec)
+    # Stevens's power law for loudness
+    spec = spec**0.3
+    
+    return tf.transpose(tf.squeeze(spec)).numpy()
+
 def audio_labels2feature_labels(samples_label, feature_type, **kwargs):
     """
     Returns: flat int64_list list
     """
-    if feature_type in ['spectrogram', 'dft', 'polar']:
+    if feature_type in ['spectrogram', 'spectrogram_tf', 'dft', 'polar']:
         labs = sample_labels2spectrogam_labels(samples_label, **kwargs)
     else:
         raise ValueError("audio_labels2feature_labels: Feature type %s is unsupported." % feature_type)
