@@ -15,7 +15,7 @@ import numpy as np
 import pydub
 import pyroomacoustics as pra
 import scipy.fftpack
-from scipy.signal import argrelextrema
+from scipy.signal import argrelextrema, butter, sosfilt
 
 from util.ft import normalize_0_1, dct_filters, power_law_compression
 
@@ -480,6 +480,23 @@ def mix_2_sources(source1, source2, room_dim, room_absorption, source1_to_mic_re
     mono_room = np.mean(room.mic_array.signals, axis=0)
     mono_room = scale_to_peak_windowed_dBFS(mono_room, target_dBFS)
     return mono_room
+
+def human_hearing_hi_pass(y):
+    """
+    cutoff at 15hz, 10 taps, parameters from:
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
+    """
+    sos = butter(10, 15, 'hp', fs=sr, output='sos')
+    return sosfilt(sos, y)
+    
+def quantize(y, nbits=16):
+    """
+    Keep y in the -1,+1 format but make it behave like lower precision.
+    """
+    y = y * 2**(nbits-1)
+    y = np.round(y)
+    y = y / 2**(nbits-1)
+    return y
 
 def todB(y):
     # 20*np.log10(np.sqrt(( y )))

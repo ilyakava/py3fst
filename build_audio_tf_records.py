@@ -35,7 +35,7 @@ from util.phones import load_vocab
 from augment_audio import augment_audio, extract_example, sample_labels2spectrogam_labels, \
     samples2spectrogam, augment_audio_two_negatives, mix_2_sources, \
     gwn_for_audio, scale_to_peak_windowed_dBFS, augment_audio_with_words, \
-    samples2dft, samples2polar
+    samples2dft, samples2polar, human_hearing_hi_pass, quantize
 
 import pdb
 
@@ -111,6 +111,8 @@ def audio2feature(samples, feature_type, **kwargs):
     """
     Returns: flat float list
     """
+    # experiment with pre-emph
+    
     if feature_type == 'spectrogram':
         feat = samples2spectrogam(samples, **kwargs)
     elif feature_type == 'spectrogram_tf':
@@ -121,6 +123,8 @@ def audio2feature(samples, feature_type, **kwargs):
         feat = samples2polar(samples, **kwargs)
     else:
         raise ValueError("audio2feature: Feature type %s is unsupported." % feature_type)
+        
+    # experiment with dc offset removal
     return tf.train.FloatList(value=feat.reshape(-1))
 
 def samples2spectrogam_tf(samples, win_length, hop_length, n_fft=512):
@@ -186,8 +190,6 @@ def serialize_example(samples, samples_label, win_length, hop_length, example_le
     assert len(samples) == example_length, 'Length of samples is wrong, expected %i received %i.' % (example_length, len(samples))
     assert len(samples_label) == example_length, 'Length of samples_label is wrong, expected %i received %i.' % (example_length, len(samples_label))
     assert example_length % hop_length == 0, 'Example length should be a multiple of hop_length'
-    
-    samples = scale_to_peak_windowed_dBFS(samples, target_dBFS=-15.0, rms_window=5)
     
     example_features = audio2feature(samples, feature_type, win_length=win_length, hop_length=hop_length)
     feature['spectrogram'] = tf.train.Feature(float_list=example_features)
@@ -292,6 +294,15 @@ def _build_tf_records_from_dataset(p_files, p_start_ends, p_pitches, n_files, \
                 mix = mix_2_sources(source1, source2, room_dim, room_absorption, source1_distance, source2_distance, target_dBFS=-15.0)
                 mix = mix[:example_length]
                 
+                # observing a lot of low-freq sounds, could be messing up normalization
+                mix = human_hearing_hi_pass(mix)
+                
+                # normalize
+                mix = scale_to_peak_windowed_dBFS(mix, target_dBFS=-15.0, rms_window=5)
+                
+                # quantize
+                mix = quantize(mix)
+                
                 example = serialize_example(mix, samples_labs, win_length, hop_length, example_length, feature_type)
             except Exception as e:
                 print("Error augmenting inputs {}, {}\n{}".format(p_file, n_file, e))
@@ -373,6 +384,8 @@ def _build_tf_records_from_phoneme_dataset(files, output_dir, max_per_record, \
                 mix = mix[:len(y)]
             else:
                 raise ValueError("Unsupported noise_type %s" % noise_type)
+                
+            mix = scale_to_peak_windowed_dBFS(mix, target_dBFS=-15.0, rms_window=5)
             
             example = serialize_example(mix, phns[:,sub_clip_i], win_length, hop_length, example_length, feature_type)
         

@@ -132,7 +132,7 @@ def train(args):
         if args.eval_only:
             # point of eval only mode is to get the threshold to get a desired
             # performance at.
-            thresholds = np.arange(0.0, 1.0, 1.0/200, dtype=np.float32)
+            thresholds = np.arange(0.0, 1.0, 1.0/1000, dtype=np.float32)
             myevalops['whole_clip/false_positives'] = tf.metrics.false_positives_at_thresholds( clip_gt, clip_probas, thresholds)
             myevalops['whole_clip/false_negatives'] = tf.metrics.false_negatives_at_thresholds( clip_gt, clip_probas, thresholds)
         else:
@@ -162,6 +162,8 @@ def train(args):
     saved_model_serving_input_receiver_fn = partial(identity_serving_input_receiver_fn, spec_h, inference_width)
     
     warm_starts = sorted(glob.glob(args.warm_start_from)) if args.warm_start_from is not None else None
+    if args.warm_start_from is not None:
+        assert len(warm_starts), "Provided warm start %s glob that does not resolve to any files" % args.warm_start_from
     if args.export_only_dir is not None:
         # check that warm_start_from exists as a glob directory
         assert warm_starts is not None, "Must provide warm start for exporting"
@@ -214,7 +216,7 @@ def train(args):
     # 90 steps * 32 bs at example_length=19840 is 1 hour
     eval_spec_dnn = tf.estimator.EvalSpec(input_fn = lambda: input_fn(
         args.val_data_root, bs, eval_parser, infinite=False,
-        shift=val_mean, center=val_std), steps=90, exporters=exporters)
+        shift=val_mean, center=val_std), steps=90, exporters=exporters, throttle_secs=300)
     
     if args.eval_only:
         eval_op_results = model.evaluate(input_fn = lambda: input_fn(
