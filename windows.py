@@ -301,6 +301,9 @@ def fst2d_phi_factory(kernel_size):
     return winO(1, kernel, [[0,0]], kernel_size)
     
 def gen_cort(freq, l=32, sr=1000//8):
+    """
+    sr: frames per second, related to frame_length
+    """
     # nsltools function, cortical filter in temporal dimension
     t = np.arange(l, dtype=float) / sr * freq
     h = np.sin(2*np.pi*t) * t**2 * np.exp(-3.5*t) * freq;

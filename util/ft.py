@@ -28,7 +28,7 @@ def unnormalize_0_1(normalized, m, M):
     return (np.clip(normalized, 0, 1) * (M - m)) + m
     
 def dct_filters(n_filters, n_input):
-    """https://librosa.github.io/librosa/0.6.3/_modules/librosa/filters.html#dct
+    """http://man.hubwiz.com/docset/LibROSA.docset/Contents/Resources/Documents/_modules/librosa/filters.html
     """
     basis = np.empty((n_filters, n_input))
     basis[0, :] = 1.0 / np.sqrt(n_input)

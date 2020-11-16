@@ -14,6 +14,7 @@ import time
 from multiprocessing.pool import Pool
 from multiprocessing import Lock, Value
 
+from librosa.filters import mel
 from librosa.util import pad_center, frame
 import numpy as np
 from pydub import AudioSegment
@@ -117,6 +118,8 @@ def audio2feature(samples, feature_type, **kwargs):
         feat = samples2spectrogam(samples, **kwargs)
     elif feature_type == 'spectrogram_tf':
         feat = samples2spectrogam_tf(samples, **kwargs)
+    elif feature_type == 'LFBE_tf':
+        feat = samples2LFBE_tf(samples, **kwargs)
     elif feature_type == 'dft':
         feat = samples2dft(samples, **kwargs)
     elif feature_type == 'polar':
@@ -160,16 +163,56 @@ def samples2spectrogam_tf(samples, win_length, hop_length, n_fft=512):
         name='STFT'
     )
     spec = tf.abs(spec)
-    # Stevens's power law for loudness
+    # Stevens's power law for loudness, see Dick Lyon's 2017 book, fig 4.2
     spec = spec**0.3
     
     return tf.transpose(tf.squeeze(spec)).numpy()
+
+def samples2LFBE_tf(samples, win_length, hop_length, n_fft=1024, n_mels=256):
+    """Magnitude of spectrogram dot product with mel filterbanks
+    For labels use: sample_labels2spectrogam_labels.
+    
+    Interchangeable with samples2spectrogam.
+    
+    samples: 1-D array of values in range -1,1
+    
+    Returns a spectrogram that is n_fft // 2 + 1 high, and
+    len(samples) // hop_length + 1 wide
+    """
+    x = tf.expand_dims(tf.cast(samples, tf.float32), 0) # batch, time
+    x = tf.pad(x, ((0, 0),(n_fft//2, n_fft//2)), "REFLECT")
+    
+    def mywindow_fn(argi, dtype):
+        """
+        argi is the length of the window that is returned. In this case it is
+        n_fft. The window returned will be a win_length window zero padded to
+        be n_fft long.
+        """
+        del argi
+        return tf.convert_to_tensor(librosa_window_fn(win_length, n_fft), dtype=dtype)
+    
+    spec = tf.signal.stft(
+        x,
+        frame_length=n_fft,
+        frame_step=hop_length,
+        fft_length=n_fft,
+        window_fn=mywindow_fn,
+        pad_end=False,
+        name='STFT'
+    )
+    spec = tf.abs(spec)
+    B = mel(sr, n_fft, n_mels=n_mels)
+    lfbe = tf.linalg.matmul(spec, B, transpose_b=True)
+    # Stevens's power law for loudness
+    lfbe = lfbe**0.3
+    
+    return tf.transpose(tf.squeeze(lfbe)).numpy()
 
 def audio_labels2feature_labels(samples_label, feature_type, **kwargs):
     """
     Returns: flat int64_list list
     """
-    if feature_type in ['spectrogram', 'spectrogram_tf', 'dft', 'polar']:
+    if feature_type in ['spectrogram', 'spectrogram_tf', 'LFBE_tf', 'dft', 'polar']:
         labs = sample_labels2spectrogam_labels(samples_label, **kwargs)
     else:
         raise ValueError("audio_labels2feature_labels: Feature type %s is unsupported." % feature_type)
@@ -591,8 +634,16 @@ def create_wakeword_dataset(args):
     n_train_files, n_val_files = train_val_speaker_separation(args.negative_data_dir, fglob='*/*.flac', percentage_train=args.percentage_train)
     p_train_files, p_val_files = train_val_speaker_separation_wakeword_metafile(args, percentage_train=args.percentage_train)
     
-    assert len(p_train_files) * args.positive_multiplier < len(n_train_files), 'Not enough negative recordings'
-    assert len(p_val_files) * args.positive_multiplier < len(n_val_files), 'Not enough negative recordings'
+    n_train_files_cycles = 1 + (len(p_train_files) * args.positive_multiplier) // len(n_train_files)
+    n_val_files_cycles = 1 + (len(p_val_files) * args.positive_multiplier) // len(n_val_files)
+    
+    if args.train_path is not None and n_train_files_cycles > 1:
+        print('Cycling training negative files {} times'.format(n_train_files_cycles))
+    if args.val_path is not None and n_val_files_cycles > 1:
+        print('Cycling val negative files {} times'.format(n_val_files_cycles))
+    
+    n_train_files = n_train_files * n_train_files_cycles
+    n_val_files = n_val_files * n_val_files_cycles
     
     random.shuffle(n_train_files)
     random.shuffle(n_val_files)

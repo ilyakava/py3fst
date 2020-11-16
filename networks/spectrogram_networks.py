@@ -464,6 +464,872 @@ def cortical_net_v0(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec
             out = tf.squeeze(out, axis=1) # [-1]
 
     return out
+    
+def cortical_net_v0res1(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        res = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res = tf.layers.conv2d(res, ncort, 1, 1, activation=None, name="conv1")
+        cortical = cortical + res
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res1b(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        res = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res = tf.layers.conv2d(res, ncort, 1, 1, activation=None, name="conv1")
+        res = tf.layers.dropout(res, rate=dropout, training=is_training)
+        cortical = cortical + res
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res1c(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, 0.2) # batch, freq, time, chan
+        
+        res = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res = tf.layers.conv2d(res, ncort, 1, 1, activation=None, name="conv1")
+        res = tf.layers.dropout(res, rate=dropout, training=is_training)
+        cortical = cortical + res
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, 0.2)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res1cmini(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, 0.2) # batch, freq, time, chan
+        
+        res = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res = tf.layers.conv2d(res, ncort, 1, 1, activation=None, name="conv1")
+        res = tf.layers.dropout(res, rate=dropout, training=is_training)
+        cortical = cortical + res
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
+            # out = simple_prenet(out, hidden_units, is_training, 0.2)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_approx0(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        x = tf.expand_dims(x, -1) # batch, freq, time, 1
+        
+        # cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        with tf.variable_scope('cortical_approx', reuse=reuse):
+            ry = tf.layers.conv2d(x, ncort, filter_size, 1, activation=tf.math.square, name="real", padding='SAME')
+            iy = tf.layers.conv2d(x, ncort, filter_size, 1, activation=tf.math.square, name="imag", padding='SAME')
+            
+            cortical = tf.pow(ry + iy, 0.5)
+        
+        
+        
+        res = tf.layers.conv2d(x, ncort, 1, 1, activation=None, name="conv1")
+        res = tf.layers.dropout(res, rate=dropout, training=is_training)
+        cortical = cortical + res
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+
+def cortical_net_approx1(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        x = tf.transpose(x, [0,2,1])
+        
+        with tf.variable_scope('cortical_approx', reuse=reuse):
+            
+            wrx = tf.layers.dense(x, units=hidden_units*2, activation=None, name='wr')
+            wix = tf.layers.dense(x, units=hidden_units*2, activation=None, name='wi')
+            
+            ry = wrx - wix
+            iy = wrx + wix
+        
+            cortical = tf.pow(tf.pow(ry, 2) + tf.pow(iy, 2), 0.5)
+            
+        res = tf.layers.dense(x, units=hidden_units*2, activation=None)
+        out = cortical + res
+        out = tf.nn.relu(out)
+        
+        out = tf.layers.dense(out, units=hidden_units, activation=tf.nn.relu)
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res2(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        x = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res = tf.layers.conv2d(cortical, 1, 1, 1, activation=None, name="conv1")
+        res = x + res
+        
+        out = tf.transpose(res, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * 1])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res3(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        x = tf.expand_dims(x, -1) # batch, freq, time, 1
+        res1 = tf.layers.conv2d(x, 4, 1, 1, activation=None, name="conv1a")
+        res2 = tf.layers.conv2d(cortical, 4, 1, 1, activation=None, name="conv1b")
+        res1 = res1 + res2
+        
+        out = tf.transpose(res1, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * 4])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res4(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+        out = tf.layers.dense(out, units=hidden_units, activation=None)
+        
+        res = tf.transpose(x, [0,2,1])
+        res = tf.layers.dense(res, units=hidden_units, activation=None)
+        
+        out = out + res
+        out = tf.nn.relu(out)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0res5(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 32
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+        out = tf.layers.dense(out, units=hidden_units*2, activation=tf.nn.relu)
+        out = tf.layers.dense(out, units=hidden_units, activation=None)
+        
+        res = tf.transpose(x, [0,2,1])
+        res = tf.layers.dense(res, units=hidden_units, activation=None)
+        
+        out = out + res
+        out = tf.nn.relu(out)
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+
+def cortical_net_v0b(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 16
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
+    
+def cortical_net_v0c(x_dict, dropout, reuse, is_training, n_classes, spec_h, spec_w):
+    """
+    1-D convolution bank + highway network, bottleneck, highway network
+    
+    Args:
+        int spec_h: ~freq
+        int spec_h: time
+    """
+    rv = [4, 8, 16, 32]
+    sv = [.25, .5, 1, 2, 4, 8]
+    ncort = len(rv) + 2*len(sv)
+    filter_size = 8
+
+    num_banks = 8 # 16 in tacotron
+    hidden_units = 64 # 128 in tacotron
+    norm_type = 'ins'
+    n_right = 10
+    n_left = 20
+    
+    bottleneck_size = 28
+    
+    with tf.variable_scope('CBHBH', reuse=reuse):
+        x = x_dict['spectrograms']
+        x = tf.reshape(x, (-1,spec_h,spec_w))
+        
+        cortical = concat_rategram_scalegram(x, rv, sv, filter_size, is_training, dropout) # batch, freq, time, chan
+        
+        out = tf.transpose(cortical, [0,2,1,3])
+        out = tf.reshape(out, [-1, spec_w, spec_h * ncort])
+
+        # batch, time, depth
+         
+        with tf.variable_scope('prenet', reuse=reuse):
+            out = simple_prenet(out, hidden_units, is_training, dropout)
+        
+        
+        # highway
+        for i in range(4):
+            out = highway_block(out, num_units=hidden_units, scope='highwaynet_featextractor_{}'.format(i))
+
+        # bottleneck
+        out = tf.layers.dense(out, units=bottleneck_size, activation=None, name="bottleneck")
+
+        # context window
+        # input is [-1, spec_w, bottleneck_size]
+        # output is [-1, spec_w-30, bottleneck_size*31]
+        contexts = []
+        for i in range(1,n_left+1):
+            contexts.append( out[:,n_left-i:-(n_right+i),:] )
+        contexts.append( out[:,n_left:-n_right,:] )
+        for i in range(1,n_right):
+            contexts.append( out[:,n_left+i:-n_right+i,:] )
+        contexts.append( out[:,n_left+n_right:,:] )
+        
+        out = tf.concat(contexts, axis=2)
+        new_num_units = (n_right+n_left+1) * bottleneck_size
+
+        # classifier highway
+        for i in range(6):
+            out = highway_block(out, num_units=new_num_units, scope='highwaynet_classifier_{}'.format(i))
+                   
+        # get classification
+        out = tf.layers.dense(out, n_classes)
+        if n_classes == 1:
+            out = tf.squeeze(out, axis=1) # [-1]
+
+    return out
 
 def st_net_v1(x, dropout, reuse, is_training, n_classes, args):
     """Network to follow ST preprocessing.
