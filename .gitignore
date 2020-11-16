@@ -19,8 +19,8 @@ lib/libsvm/tools/*
 .ipynb_checkpoints
 
 # explicitly add scripts
-scripts/*.sh
-scripts/*/*.sh
+#scripts/*.sh
+#scripts/*/*.sh
 data/*wav
 
 # temporary exploratory notebooks

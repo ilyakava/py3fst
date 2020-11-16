@@ -11,11 +11,55 @@ Please cite:
 }
 ```
 
-### Usage
+## Usage
 
 See `scripts` directory.
 
-### Installing
+### Creating data
+
+```
+scripts/wake/data.sh
+```
+
+### Training
+
+```
+scripts/wake_final/vulcan_baseline_train.sh
+scripts/wake_final/vulcan_cortical_train.sh
+```
+
+### Eval to create DET curves
+
+```
+scripts/wake_final/vulcan_baseline_eval.sh
+```
+
+### Create universal adversarial noise attacks
+
+```
+scripts/wake_final/attack_univ_all.sh
+```
+
+### Create adversarial music attacks
+
+To do this attack you will need to export a model of a different length first using:
+```
+scripts/wake/vulcan_export.124.sh
+```
+
+Then attack with:
+
+```
+scripts/wake_final/attack_univ_music.sh
+```
+
+### Eval adversarial music attacks
+
+```
+scripts/wake_final/attack_univ_music_eval.sh
+```
+
+## Installing
 
 `conda env create -f venvtf1p15nb.yml`
 
