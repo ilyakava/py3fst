@@ -21,6 +21,8 @@ See `scripts` directory.
 scripts/wake/data.sh
 ```
 
+You will see data refered to in the scripts and ipython notebooks. `v7.18` is the version of the data used in reported results (its the gpu version of `v7.17`), all code that refers to prior versions is likely outdated.
+
 ### Training
 
 ```
