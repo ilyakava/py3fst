@@ -125,9 +125,9 @@ def wav2aud( x, paras, filt='p', verbose=False ):
         octband = None
     
     if (filt == 'p_o'):
-        COCHBA = np.array(list(si.loadmat('aud24_old.mat').values()))[0]
+        COCHBA = np.array(list(si.loadmat('data/aud24_old.mat').values()))[0]
     else:
-        COCHBA = np.array(list(si.loadmat('aud24.mat').values()))[0]
+        COCHBA = np.array(list(si.loadmat('data/aud24.mat').values()))[0]
     
     [L, M] = np.shape(COCHBA) #  p_max = L - 2
     L_x = len(x) # length of input
@@ -749,7 +749,7 @@ def aud2wav(v5, x0, paras):
     #	L: max. # of order + 2;
     #	M: no. of channels
 
-    COCHBA = np.array(list(si.loadmat('aud24.mat').values()))[0]
+    COCHBA = np.array(list(si.loadmat('data/aud24.mat').values()))[0]
     [L, M] = np.shape(COCHBA)	# p_max = L - 2
 
     # options
@@ -803,7 +803,7 @@ def aud2wav(v5, x0, paras):
     L_x0 = int(len(x0))
     x0 = x0.flatten() # watch order
     if L_x0 == 0:
-        x0 = np.random.rand((L_x,))-.5	# uniform random sequence
+        x0 = np.random.rand(L_x)-.5	# uniform random sequence
         x0 = unitseq(x0)		# N(0, 1)
     elif L_x0 < L_x:
         padlen=L_x-L_x0

@@ -4,6 +4,7 @@
 """
 
 from collections import namedtuple
+from enum import Enum
 import itertools
 
 import numpy as np
@@ -300,9 +301,14 @@ def fst2d_phi_factory(kernel_size):
 
     return winO(1, kernel, [[0,0]], kernel_size)
     
-def gen_cort(freq, l=32, sr=1000//8):
+class FilterType(Enum):
+    LOWPASS = 1
+    BANDPASS = 2
+    HIGHPASS = 3
+    
+def gen_cort(freq, l=32, sr=1000//8, filt_type=FilterType.BANDPASS):
     """
-    sr: frames per second, related to frame_length
+    sr: (SRT) frames per second, related to frame_length
     """
     # nsltools function, cortical filter in temporal dimension
     t = np.arange(l, dtype=float) / sr * freq
@@ -311,27 +317,75 @@ def gen_cort(freq, l=32, sr=1000//8):
     H0 = np.fft.fft(h, 2*l)
     A = np.angle(H0[:l]);
     H = np.abs(H0[:l])
-    H /= H.max()
+    maxHi = np.argmax(H)
+    maxH = H[maxHi]
+    H /= maxH
+    
+    if filt_type is FilterType.LOWPASS:
+        H[:maxHi] = 1
+    elif filt_type is FilterType.HIGHPASS:
+        H[(maxHi+1):] = 1
+              
     return H * np.exp(1j*A)
     
-def gen_corf(freq, l=32, sr=24):
+def gen_corf(freq, l=32, sr=24, filt_type=FilterType.BANDPASS):
+    """
+    sr: (SRF)
+    """
     # nsltools function, cortical filter in freq dimension
     r1 = np.arange(l, dtype=float) / l * sr / 2 / freq
     r1 = r1**2
     H = r1 * np.exp(1-r1)
-    return H
+    maxHi = np.argmax(H)
+    sumH = H.sum()
     
-def cortical_window(rate, scale, sign=1, l=32):
+    if filt_type is FilterType.LOWPASS:
+        H[:maxHi] = 1
+        H = H / H.sum() * sumH
+    elif filt_type is FilterType.HIGHPASS:
+        H[(maxHi+1):] = 1
+        H = H / H.sum() * sumH
+            
+    return H
+
+def cortical_2x1d_FDomain_factory(rv, sv, l):
+    """
+    in schematc nsltools uses params:
+    [4, 8, 16, 32], [.25, .5, 1, 2, 4, 8], 128
+    """
+    filters = np.zeros((len(sv),len(rv),2,l), dtype=np.complex64)
+    for rdx, rate in enumerate(rv):
+        for sdx, scale in enumerate(sv):
+
+            rate_filt_type = FilterType.BANDPASS
+            if rate == min(rv):
+                rate_filt_type = FilterType.LOWPASS
+            elif rate == max(rv):
+                rate_filt_type = FilterType.HIGHPASS
+            scale_filt_type = FilterType.BANDPASS
+            if scale == min(sv):
+                scale_filt_type = FilterType.LOWPASS
+            elif scale == max(sv):
+                scale_filt_type = FilterType.HIGHPASS
+
+            R1 = gen_cort(rate, l, filt_type=rate_filt_type)
+            R2 = gen_corf(scale, l, filt_type=scale_filt_type)
+
+            filters[sdx,rdx,0,:] = R1
+            filters[sdx,rdx,1,:] = R2
+    return filters
+    
+def cortical_window(rate, scale, sign=1, l=32, rate_filt_type=FilterType.BANDPASS, scale_filt_type=FilterType.BANDPASS):
     """
     rate = t_freq
     scale = f_freq
     """
-    R1 = gen_cort(rate, l);
+    R1 = gen_cort(rate, l, filt_type=rate_filt_type);
     r1 = np.fft.ifft(R1, l*2);
     r1 = r1[:l];
 
     # % scale response
-    R2 = gen_corf(scale, l/2);
+    R2 = gen_corf(scale, l/2, filt_type=scale_filt_type);
     r2 = np.fft.ifft(R2, l);
     r2 = np.roll(r2, l//2)
 
@@ -347,14 +401,24 @@ def cortical_window(rate, scale, sign=1, l=32):
 def cortical_psi_factory(rv, sv, l):
     """
     in schematc nsltools uses params:
-    [4, 8, 16, 32], [.25, .5, 1, 2, 4, 8], 64
+    [4, 8, 16, 32], [.25, .5, 1, 2, 4, 8], 128
     """
     params = np.array(list(itertools.product(rv, sv, [1,-1])))
     nfilt = len(params)
     filters = np.zeros((l,l,nfilt), dtype=np.complex64)
     for i, param in enumerate(params):
         rate, scale, sign = param
-        filters[:,:,i] = cortical_window(rate, scale, sign, l)
+        rate_filt_type = FilterType.BANDPASS
+        if rate == min(rv):
+            rate_filt_type = FilterType.LOWPASS
+        elif rate == max(rv):
+            rate_filt_type = FilterType.HIGHPASS
+        scale_filt_type = FilterType.BANDPASS
+        if scale == min(sv):
+            scale_filt_type = FilterType.LOWPASS
+        elif scale == max(sv):
+            scale_filt_type = FilterType.HIGHPASS
+        filters[:,:,i] = cortical_window(rate, scale, sign, l, rate_filt_type, scale_filt_type)
     return winO(nfilt, filters, params, np.array([l,l]))
 
 import matplotlib.pyplot as plt
