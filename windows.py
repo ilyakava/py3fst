@@ -352,6 +352,8 @@ def cortical_2x1d_FDomain_factory(rv, sv, l):
     """
     in schematc nsltools uses params:
     [4, 8, 16, 32], [.25, .5, 1, 2, 4, 8], 128
+    
+    Doesn't add additional filters by modifying for +/- phase.
     """
     filters = np.zeros((len(sv),len(rv),2,l), dtype=np.complex64)
     for rdx, rate in enumerate(rv):

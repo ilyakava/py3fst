@@ -13,7 +13,7 @@ def fft_forward_cortical(cfs, input_fft):
     python implementation of aud2cor in nsltools matlab
     """
     l = cfs.shape[3]
-    cort_py_fft = np.zeros((cfs.shape[0], 2*cfs.shape[1], l, l), dtype=np.complex)
+    cort = np.zeros((cfs.shape[0], 2*cfs.shape[1], l, l), dtype=np.complex)
     for sdx in range(cfs.shape[0]):
         for rdx in range(cfs.shape[1]):
             for sign in [1,-1]:
@@ -38,14 +38,14 @@ def fft_forward_cortical(cfs, input_fft):
                 
                 cort_0_0 = cort_0_0[:l,:l]
 
-                cort_py_fft[sdx,rdx + int(sign==1)*cfs.shape[1]] = cort_0_0
-    return cort_py_fft
+                cort[sdx,rdx + int(sign==1)*cfs.shape[1]] = cort_0_0
+    return cort
 
 def forward_cortical(cfs, audspec):
     """forward cortical in time domain
     """
     l = cfs.shape[3]
-    cort_py_fft = np.zeros((cfs.shape[0], 2*cfs.shape[1], l, l), dtype=np.complex)
+    cort = np.zeros((cfs.shape[0], 2*cfs.shape[1], audspec.shape[0], audspec.shape[1]), dtype=np.complex)
     for sdx in range(cfs.shape[0]):
         for rdx in range(cfs.shape[1]):
             for sign in [1,-1]:
@@ -70,8 +70,8 @@ def forward_cortical(cfs, audspec):
                 
                 cort_0_0  = scipy.signal.convolve(z1t_py, np.roll(r2,l), mode='same')
                 
-                cort_py_fft[sdx,rdx + int(sign==1)*cfs.shape[1]] = cort_0_0
-    return cort_py_fft
+                cort[sdx,rdx + int(sign==1)*cfs.shape[1]] = cort_0_0
+    return cort
     
 def fft_backward_cortical(cfs, input_cort):
     """fft backward cortical
