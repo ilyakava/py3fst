@@ -21,8 +21,8 @@ lib/libsvm/tools/*
 # explicitly add scripts
 #scripts/*.sh
 #scripts/*/*.sh
-data/*wav
+#data/*wav
 
 # temporary exploratory notebooks
-Plots.ipynb
-inspect_wakeword_dataset.ipynb
+#Plots.ipynb
+#inspect_wakeword_dataset.ipynb
