@@ -3,11 +3,10 @@
 Please cite:
 
 ```
-@article{tfST,
-	title={Three-Dimensional Fourier Scattering Transform and Classification of Hyperspectral Images},
-	author={Ilya Kavalerov and Weilin Li and Wojciech Czaja and Rama Chellappa},
-	journal={arXiv preprint arXiv:1906.06804},
-	year={2019}
+@article{py3fst,
+	title={Cortical Features for Defense Against Adversarial Audio Attacks},
+	author={Ilya Kavalerov and Frank Zheng and Wojciech Czaja and Rama Chellappa},
+	year={Under Review}
 }
 ```
 
