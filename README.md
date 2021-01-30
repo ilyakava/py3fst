@@ -6,7 +6,8 @@ Please cite:
 @article{py3fst,
 	title={Cortical Features for Defense Against Adversarial Audio Attacks},
 	author={Ilya Kavalerov and Frank Zheng and Wojciech Czaja and Rama Chellappa},
-	year={Under Review}
+	journal={arXiv preprint},
+	year={2021}
 }
 ```
 
