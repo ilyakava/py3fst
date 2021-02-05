@@ -6,15 +6,20 @@ from networks.spectrogram_networks import Guo_Li_net
 import time
 import os
 
-audio_length = 19680
+n_fft = 512
+hop_length = 160
+win_length = 400
+
+audio_length = n_fft-hop_length + hop_length*31
 initial_bound = 0.08 # initial l infinity norm for adversarial perturbation
-h = 257  # shape of the spectrogram (batch_size, h, w)
-w = 31
 
 class Attack:
-    def __init__(self, sess, specs, labels, batch_size=1, lr_stage1=0.05, lr_stage2=0.5, num_iter_stage1 = 1000,
+    def __init__(self, sess, audios, labels, batch_size, lr_stage1=0.05, lr_stage2=0.5, num_iter_stage1 = 1000,
                 num_iter_stage2 = 5000):
-        self.specs = normalize(specs)
+        self.audios = audios
+        self.batch_size = batch_size
+        self.audio_length = audios.shape[1]
+        
         self.labels = labels
         self.sess = sess 
         self.num_iter_stage1 = num_iter_stage1
@@ -25,32 +30,29 @@ class Attack:
         tf.set_random_seed(0)
         
         # placeholders
-        self.spec_input =  tf.placeholder(tf.float32, shape=[batch_size, h, w], name="input_spec")
+        self.audio_input =  tf.placeholder(tf.float32, shape=[batch_size, self.audio_length], name="input_audio")
         self.target_ph  = tf.placeholder(tf.float32, shape=[batch_size, 3], name='target_labels')
         self.psd_max_ori = tf.placeholder(tf.float32, shape=[batch_size], name='psd')
         self.th = tf.placeholder(tf.float32, shape=[batch_size, None, None], name='masking_threshold')
         
         # variable
-        self.delta = tf.Variable(np.zeros((batch_size, h, w), dtype=np.float32), name='delta')
-        self.rescale = tf.Variable(np.ones((batch_size, 1, 1), dtype=np.float32), name='rescale')
+        self.delta = tf.Variable(np.zeros((batch_size, self.audio_length), dtype=np.float32), name='delta')
+        self.rescale = tf.Variable(np.ones((batch_size, 1), dtype=np.float32), name='rescale')
         self.alpha = tf.Variable(np.ones((batch_size), dtype=np.float32) * 0.000001, name='alpha')
         
         # add perturbation
         self.apply_delta = tf.clip_by_value(self.delta, -initial_bound, initial_bound) * self.rescale   
-        self.new_inputs  = self.apply_delta + self.spec_input
+        self.new_inputs  = self.apply_delta + self.audio_input
         self.inputs = tf.clip_by_value(self.new_inputs, -2**15, 2**15-1)
         
         # pass in to the network
-        input_dict = {"spectrograms":self.inputs}
-        self.output_ph = Guo_Li_net(input_dict, dropout=0.2, reuse=tf.AUTO_REUSE, 
-                              is_training=False, n_classes=3, spec_h=h, spec_w=w)
-        self.output_ph = tf.reshape(self.output_ph, [-1,3])
+        self.output_ph = network(self.inputs)
         self.loss   = tf.nn.softmax_cross_entropy_with_logits(labels=self.target_ph, logits=self.output_ph)
         self.total_loss = tf.reduce_mean(self.loss)
         
         # compute the loss for masking threshold
         self.loss_th_list = []
-        self.transform = Transform(window_size=400)
+        self.transform = Transform(window_size=2048)
         for i in range(self.batch_size):
             logits_delta = self.transform((self.apply_delta[i, :]), (self.psd_max_ori)[i])
             loss_th =  tf.reduce_mean(tf.nn.relu(logits_delta - (self.th)[i]))            
@@ -67,19 +69,18 @@ class Attack:
         self.train2 = tf.group(self.train21, self.train22)       
         
     def attack_stage1(self, target, verbose=0):
-        self.target = target
-        sess = self.sess       
-        # warm_start
-        warm_start_from, id_assignment_map = warm_start()
+        self.target = target       
+        sess = self.sess
         # initialize and load the pretrained model
+        warm_start_from, id_assignment_map = warm_start()
         tf.train.init_from_checkpoint(warm_start_from, id_assignment_map)
         sess.run(tf.initialize_all_variables())
             
         # reassign the variables  
-        sess.run(tf.assign(self.rescale, np.ones((self.batch_size, 1, 1), dtype=np.float32)))             
-        sess.run(tf.assign(self.delta, np.zeros((self.batch_size, h, w), dtype=np.float32)))
+        sess.run(tf.assign(self.rescale, np.ones((self.batch_size, 1), dtype=np.float32)))             
+        sess.run(tf.assign(self.delta, np.zeros((self.batch_size, self.audio_length), dtype=np.float32)))
         
-        feed_dict = {self.spec_input: self.specs, self.target_ph: target}
+        feed_dict = {self.audio_input: self.audios, self.target_ph: target}
         
         # We'll make a bunch of iterations of gradient descent here
         now = time.time()
@@ -93,7 +94,7 @@ class Attack:
             # Actually do the optimization                           
             sess.run(self.train1, feed_dict)
             delta, loss, predictions, new_inputs = sess.run((self.delta, self.loss, self.output_ph, self.new_inputs), feed_dict) 
-            feed_dict = {self.spec_input: self.specs , self.target_ph: target}
+            feed_dict = {self.audio_input: self.audios , self.target_ph: target}
             
             sampled_input = []
             if i % 10 == 0 and verbose==1:
@@ -148,14 +149,14 @@ class Attack:
         tf.train.init_from_checkpoint(warm_start_from, id_assignment_map)
         sess.run(tf.initialize_all_variables())
         
-        sess.run(tf.assign(self.rescale, np.ones((self.batch_size, 1, 1), dtype=np.float32)))
+        sess.run(tf.assign(self.rescale, np.ones((self.batch_size, 1), dtype=np.float32)))
         #sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float32) * 0.0))
-        sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float64) * 1e-10))
+        sess.run(tf.assign(self.alpha, np.ones((self.batch_size), dtype=np.float64) * 0.01))
         
         # reassign the perturbation
         sess.run(tf.assign(self.delta, adv))        
         
-        feed_dict = {self.spec_input: self.specs, self.target_ph: self.target, self.psd_max_ori: psd_max_batch, self.th: th_batch}
+        feed_dict = {self.audio_input: self.audios, self.target_ph: self.target, self.psd_max_ori: psd_max_batch, self.th: th_batch}
         predictions, loss = sess.run((self.output_ph, tf.reduce_mean(self.loss_th)), feed_dict) 
         print("Perturbation sucess rate:{}".format(accuracy(predictions, self. target)))
         print("Original perceptual loss:{}".format(loss))
@@ -237,13 +238,13 @@ class Attack:
             clock += time.time() - now
         final_deltas = np.array(final_deltas)
         return final_deltas, loss_th, final_alpha
-    
+
 def main():
-    _, batched_input, labels, th_batch, psd_max_batch = load_data()
+    batched_input, labels, th_batch, psd_max_batch = load_data()
     # Set the attack target
-    target = np.zeros((328,3))
-    target[:,0] = np.ones(328)
     batch_size=batched_input.shape[0]
+    target = np.zeros((batch_size,3))
+    target[:,0] = np.ones(batch_size)
     attack = Attack(tf.Session(), batched_input, labels, 
                     batch_size=batched_input.shape[0], 
                     lr_stage1=0.03, lr_stage2=0.05, 
@@ -252,16 +253,16 @@ def main():
     if (not os.path.isfile('pgd adversarial examples.npy')):
         print("----------------Attack Stage 1----------------------")
         adv_example = attack.attack_stage1(target, verbose=1)
-        adv = adv_example - normalize(batched_input)
-        with open('pgd adversarial examples.npy', 'wb') as f:
-            np.save(f, unnormalize(adv_example))
+        adv = adv_example - batched_input
+        with open('./adv_examples/pgd adversarial examples.npy', 'wb') as f:
+            np.save(f, adv_example)
     else:
-        adv = normalize(np.load("pgd adversarial examples.npy")) - normalize(batched_input)
+        adv = np.load("./adv_examples/pgd adversarial examples.npy") - batched_input
         attack.target = target
     print("----------------Attack Stage 2----------------------")
     adv_example, loss_th, final_alpha = attack.attack_stage2(adv, th_batch, psd_max_batch, verbose=1)
-    with open('perceptual adversarial examples.npy', 'wb') as f:
-        np.save(f, unnormalize(adv_example))
+    with open('./adv_examples/perceptual adversarial examples.npy', 'wb') as f:
+        np.save(f, adv_example)
         
 if __name__ == '__main__':
     main()   
